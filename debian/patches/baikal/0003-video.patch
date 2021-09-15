@@ -1,0 +1,3840 @@
+diff --git a/drivers/gpu/drm/Kconfig b/drivers/gpu/drm/Kconfig
+index 0039df26854..40a8fd58388 100644
+--- a/drivers/gpu/drm/Kconfig
++++ b/drivers/gpu/drm/Kconfig
+@@ -236,6 +236,7 @@ config DRM_SCHED
+ source "drivers/gpu/drm/i2c/Kconfig"
+ 
+ source "drivers/gpu/drm/arm/Kconfig"
++source "drivers/gpu/drm/baikal/Kconfig"
+ 
+ config DRM_RADEON
+ 	tristate "ATI Radeon"
+diff --git a/drivers/gpu/drm/Makefile b/drivers/gpu/drm/Makefile
+index 0dff40bb863..56244cba2e0 100644
+--- a/drivers/gpu/drm/Makefile
++++ b/drivers/gpu/drm/Makefile
+@@ -127,3 +127,4 @@ obj-$(CONFIG_DRM_TIDSS) += tidss/
+ obj-y			+= xlnx/
+ obj-y			+= gud/
+ obj-$(CONFIG_DRM_HYPERV) += hyperv/
++obj-$(CONFIG_DRM_BAIKAL_VDU) += baikal/
+diff --git a/drivers/gpu/drm/baikal/Kconfig b/drivers/gpu/drm/baikal/Kconfig
+new file mode 100644
+index 00000000000..25bd1490dd3
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/Kconfig
+@@ -0,0 +1,20 @@
++config DRM_BAIKAL_VDU
++	tristate "DRM Support for Baikal-M VDU"
++	depends on DRM
++	depends on ARM || ARM64 || COMPILE_TEST
++	depends on COMMON_CLK
++	default m if ARCH_BAIKAL
++	select DRM_KMS_HELPER
++	select DRM_KMS_CMA_HELPER
++	select DRM_PANEL
++	select VT_HW_CONSOLE_BINDING if FRAMEBUFFER_CONSOLE
++	help
++	  Choose this option for DRM support for the Baikal-M Video Display Unit (VDU).
++	  If M is selected the module will be called baikal_vdu_drm.
++
++config DRM_BAIKAL_VDU_BACKLIGHT
++	bool "PWM backlight support for Baikal-M VDU"
++	depends on DRM_BAIKAL_VDU
++	default y
++	help
++	  Enable this option to add PWM-based backlight support for the Baikal-M Video Display Unit (VDU).
+diff --git a/drivers/gpu/drm/baikal/Makefile b/drivers/gpu/drm/baikal/Makefile
+new file mode 100644
+index 00000000000..e76a937bd27
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/Makefile
+@@ -0,0 +1,12 @@
++# SPDX-License-Identifier: GPL-2.0
++baikal_vdu_drm-y +=	baikal_vdu_connector.o \
++		baikal_vdu_crtc.o \
++		baikal_vdu_drv.o \
++		baikal_vdu_irq.o \
++		baikal_vdu_plane.o
++
++baikal_vdu_drm-$(CONFIG_DRM_BAIKAL_VDU_BACKLIGHT) += baikal_vdu_backlight.o
++baikal_vdu_drm-$(CONFIG_DEBUG_FS) += baikal_vdu_debugfs.o
++
++obj-$(CONFIG_DRM_BAIKAL_VDU) += baikal_vdu_drm.o
++obj-$(CONFIG_DRM_BAIKAL_HDMI) += baikal-hdmi.o
+diff --git a/drivers/gpu/drm/baikal/baikal-hdmi.c b/drivers/gpu/drm/baikal/baikal-hdmi.c
+new file mode 100644
+index 00000000000..e19aafbac5c
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal-hdmi.c
+@@ -0,0 +1,118 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Baikal Electronics BE-M1000 DesignWare HDMI 2.0 Tx PHY support driver
++ *
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * Copyright (C) 2016 Renesas Electronics Corporation
++ *
++ * Contact: Laurent Pinchart (laurent.pinchart@ideasonboard.com)
++ */
++
++#include <linux/module.h>
++#include <linux/of_device.h>
++#include <drm/drm_modes.h>
++
++#include <drm/bridge/dw_hdmi.h>
++
++int fixed_clock = 0;
++int max_clock = 0;
++
++static const struct dw_hdmi_mpll_config baikal_hdmi_mpll_cfg[] = {
++	/* pixelclk      opmode  gmp         */
++	{  44900000, { { 0x00b3, 0x0000 }, }, },
++	{  90000000, { { 0x0072, 0x0001 }, }, },
++	{ 182750000, { { 0x0051, 0x0002 }, }, },
++	{ 340000000, { { 0x0040, 0x0003 }, }, },
++	{ 594000000, { { 0x1a40, 0x0003 }, }, },
++	{ ~0UL,      { { 0x0000, 0x0000 }, }, }
++};
++
++static const struct dw_hdmi_curr_ctrl baikal_hdmi_cur_ctr[] = {
++	/* pixelclk    current   */
++	{  44900000, { 0x0000, }, },
++	{  90000000, { 0x0008, }, },
++	{ 182750000, { 0x001b, }, },
++	{ 340000000, { 0x0036, }, },
++	{ 594000000, { 0x003f, }, },
++	{ ~0UL,      { 0x0000, }, }
++};
++
++static const struct dw_hdmi_phy_config baikal_hdmi_phy_cfg[] = {
++	/* pixelclk  symbol  term    vlev */
++	{ 148250000, 0x8009, 0x0004, 0x0232},
++	{ 218250000, 0x8009, 0x0004, 0x0230},
++	{ 288000000, 0x8009, 0x0004, 0x0273},
++	{ 340000000, 0x8029, 0x0004, 0x0273},
++	{ 594000000, 0x8039, 0x0004, 0x014a},
++	{ ~0UL,      0x0000, 0x0000, 0x0000}
++};
++
++static enum drm_mode_status baikal_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
++					const struct drm_display_info *info,
++					const struct drm_display_mode *mode)
++{
++	if (mode->clock < 13500)
++		return MODE_CLOCK_LOW;
++	if (mode->clock >= 340000)
++		return MODE_CLOCK_HIGH;
++	if (fixed_clock && mode->clock != fixed_clock)
++		return MODE_BAD;
++	if (max_clock && mode->clock > max_clock)
++		return MODE_BAD;
++
++	return MODE_OK;
++}
++
++static const struct dw_hdmi_plat_data baikal_dw_hdmi_plat_data = {
++	.mpll_cfg   = baikal_hdmi_mpll_cfg,
++	.cur_ctr    = baikal_hdmi_cur_ctr,
++	.phy_config = baikal_hdmi_phy_cfg,
++	.mode_valid = baikal_hdmi_mode_valid,
++};
++
++static int baikal_dw_hdmi_probe(struct platform_device *pdev)
++{
++	struct dw_hdmi *hdmi;
++	hdmi = dw_hdmi_probe(pdev, &baikal_dw_hdmi_plat_data);
++	if (IS_ERR(hdmi)) {
++		return PTR_ERR(hdmi);
++	} else {
++		return 0;
++	}
++}
++
++static int baikal_dw_hdmi_remove(struct platform_device *pdev)
++{
++	struct dw_hdmi *hdmi = platform_get_drvdata(pdev);
++	dw_hdmi_remove(hdmi);
++	return 0;
++}
++
++static const struct of_device_id baikal_dw_hdmi_of_table[] = {
++	{ .compatible = "baikal,hdmi" },
++	{ /* Sentinel */ },
++};
++MODULE_DEVICE_TABLE(of, baikal_dw_hdmi_of_table);
++
++static struct platform_driver baikal_dw_hdmi_platform_driver = {
++	.probe		= baikal_dw_hdmi_probe,
++	.remove		= baikal_dw_hdmi_remove,
++	.driver		= {
++		.name	= "baikal-dw-hdmi",
++		.of_match_table = baikal_dw_hdmi_of_table,
++	},
++};
++
++module_param(fixed_clock, int, 0644);
++module_param(max_clock, int, 0644);
++
++module_platform_driver(baikal_dw_hdmi_platform_driver);
++
++MODULE_AUTHOR("Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>");
++MODULE_DESCRIPTION("Baikal BE-M1000 SoC DesignWare HDMI 2.0 Tx + Gen2 PHY Driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_backlight.c b/drivers/gpu/drm/baikal/baikal_vdu_backlight.c
+new file mode 100644
+index 00000000000..51d94861398
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_backlight.c
+@@ -0,0 +1,262 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * Copyright (c) 2006-2008 Intel Corporation
++ * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
++ * Copyright (C) 2011 Texas Instruments
++ * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
++ */
++
++/**
++ * baikal_vdu_backlight.c
++ * Implementation of the connector backlight functions for Baikal Electronics
++ * BE-M1000 SoC's VDU
++ */
++
++#include <linux/clk.h>
++#include <linux/input.h>
++
++#include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
++
++#define BAIKAL_VDU_MIN_BRIGHTNESS	0
++#define BAIKAL_VDU_DEFAULT_BRIGHTNESS	50
++#define BAIKAL_VDU_BRIGHTNESS_STEP	5
++#define BAIKAL_VDU_DEFAULT_PWM_FREQ	10000
++
++static int baikal_vdu_backlight_update_status(struct backlight_device *bl_dev)
++{
++	struct baikal_vdu_private *priv = bl_get_data(bl_dev);
++	int brightness_on = 1;
++	int brightness = bl_dev->props.brightness;
++	u8 pwmdc;
++
++	if (bl_dev->props.power != FB_BLANK_UNBLANK ||
++	    bl_dev->props.fb_blank != FB_BLANK_UNBLANK ||
++	    bl_dev->props.state & (BL_CORE_SUSPENDED | BL_CORE_FBBLANK)) {
++		brightness_on = 0;
++		brightness = priv->min_brightness;
++	}
++
++	if (priv->enable_gpio)
++		gpiod_set_value_cansleep(priv->enable_gpio, brightness_on);
++
++	pwmdc = brightness ? ((brightness << 6) / 25 - 1) : 0;
++
++	VDU_WRITE(priv, PWMDCR, pwmdc);
++
++	return 0;
++}
++
++static const struct backlight_ops baikal_vdu_backlight_ops = {
++	.options        = BL_CORE_SUSPENDRESUME,
++	.update_status	= baikal_vdu_backlight_update_status,
++};
++
++static void baikal_vdu_input_event(struct input_handle *handle,
++				   unsigned int type, unsigned int code,
++				   int value)
++{
++	struct baikal_vdu_private *priv = handle->private;
++	int brightness;
++
++	if (type != EV_KEY || value == 0)
++		return;
++
++	switch (code) {
++	case KEY_BRIGHTNESSDOWN:
++		brightness = priv->bl_dev->props.brightness -
++			     priv->brightness_step;
++		if (brightness >= priv->min_brightness)
++			backlight_device_set_brightness(priv->bl_dev,
++							brightness);
++		break;
++
++	case KEY_BRIGHTNESSUP:
++		brightness = priv->bl_dev->props.brightness +
++			     priv->brightness_step;
++		backlight_device_set_brightness(priv->bl_dev, brightness);
++		break;
++
++	case KEY_BRIGHTNESS_TOGGLE:
++		priv->brightness_on = !priv->brightness_on;
++		if (priv->brightness_on)
++			backlight_enable(priv->bl_dev);
++		else
++			backlight_disable(priv->bl_dev);
++		break;
++
++	default:
++		return;
++	}
++
++	backlight_force_update(priv->bl_dev, BACKLIGHT_UPDATE_HOTKEY);
++}
++
++static int baikal_vdu_input_connect(struct input_handler *handler,
++				    struct input_dev *dev,
++				    const struct input_device_id *id)
++{
++	struct input_handle *handle;
++	int ret;
++
++	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
++	if (!handle)
++		return -ENOMEM;
++
++	handle->private = handler->private;
++	handle->name = KBUILD_MODNAME;
++	handle->dev = dev;
++	handle->handler = handler;
++
++	ret = input_register_handle(handle);
++	if (ret)
++		goto err_free_handle;
++
++	ret = input_open_device(handle);
++	if (ret)
++		goto err_unregister_handle;
++
++	return 0;
++
++err_unregister_handle:
++	input_unregister_handle(handle);
++err_free_handle:
++	kfree(handle);
++	return ret;
++}
++
++static void baikal_vdu_input_disconnect(struct input_handle *handle)
++{
++	input_close_device(handle);
++	input_unregister_handle(handle);
++	kfree(handle);
++}
++
++static const struct input_device_id baikal_vdu_input_ids[] = {
++	{
++		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
++		.evbit = { BIT_MASK(EV_KEY) },
++	},
++
++	{ },    /* Terminating entry */
++};
++
++MODULE_DEVICE_TABLE(input, baikal_vdu_input_ids);
++
++int baikal_vdu_backlight_create(struct drm_device *drm)
++{
++	struct baikal_vdu_private *priv = drm->dev_private;
++	struct device *dev = drm->dev;
++	struct backlight_properties props;
++	struct input_handler *handler;
++	struct device_node *node;
++	u32 min_brightness = BAIKAL_VDU_MIN_BRIGHTNESS;
++	u32 dfl_brightness = BAIKAL_VDU_DEFAULT_BRIGHTNESS;
++	u32 brightness_step = BAIKAL_VDU_BRIGHTNESS_STEP;
++	u32 pwm_frequency = 0;
++	int ret = 0;
++	unsigned long rate;
++	unsigned int pwmfr = 0;
++
++	priv->enable_gpio = devm_gpiod_get_optional(dev, "enable", GPIOD_ASIS);
++	if (IS_ERR(priv->enable_gpio)) {
++		dev_warn(dev, "failed to get ENABLE GPIO\n");
++		priv->enable_gpio = NULL;
++	}
++
++	if (priv->enable_gpio && gpiod_get_direction(priv->enable_gpio) != 0)
++		gpiod_direction_output(priv->enable_gpio, 1);
++
++	node = of_get_child_by_name(dev->of_node, "backlight");
++	if (!node)
++		return 0;
++
++	of_property_read_u32(node, "min-brightness-level", &min_brightness);
++	of_property_read_u32(node, "default-brightness-level", &dfl_brightness);
++	of_property_read_u32(node, "brightness-level-step", &brightness_step);
++	of_property_read_u32(node, "pwm-frequency", &pwm_frequency);
++
++	if (pwm_frequency == 0) {
++		dev_warn(dev, "using default PWM frequency %u\n",
++			 BAIKAL_VDU_DEFAULT_PWM_FREQ);
++		pwm_frequency = BAIKAL_VDU_DEFAULT_PWM_FREQ;
++	}
++
++	memset(&props, 0, sizeof(props));
++	props.max_brightness = 100;
++	props.type = BACKLIGHT_RAW;
++	props.scale = BACKLIGHT_SCALE_LINEAR;
++
++	if (min_brightness > props.max_brightness) {
++		dev_warn(dev, "invalid min brightness level: %u, using %u\n",
++			 min_brightness, props.max_brightness);
++		min_brightness = props.max_brightness;
++	}
++
++	if (dfl_brightness > props.max_brightness ||
++	    dfl_brightness < min_brightness) {
++		dev_warn(dev,
++			 "invalid default brightness level: %u, using %u\n",
++			 dfl_brightness, props.max_brightness);
++		dfl_brightness = props.max_brightness;
++	}
++
++	priv->min_brightness = min_brightness;
++	priv->brightness_step = brightness_step;
++	priv->brightness_on = true;
++
++	props.brightness = dfl_brightness;
++	props.power = FB_BLANK_UNBLANK;
++
++	priv->bl_dev =
++		devm_backlight_device_register(dev, dev_name(dev), dev, priv,
++					       &baikal_vdu_backlight_ops,
++					       &props);
++	if (IS_ERR(priv->bl_dev)) {
++		dev_err(dev, "failed to register backlight device\n");
++		ret = PTR_ERR(priv->bl_dev);
++		priv->bl_dev = NULL;
++		goto out;
++	}
++
++	handler = devm_kzalloc(dev, sizeof(*handler), GFP_KERNEL);
++	if (!handler) {
++		dev_err(dev, "failed to allocate input handler\n");
++		ret = -ENOMEM;
++		goto out;
++	}
++
++	handler->private = priv;
++	handler->event = baikal_vdu_input_event;
++	handler->connect = baikal_vdu_input_connect;
++	handler->disconnect = baikal_vdu_input_disconnect;
++	handler->name = KBUILD_MODNAME;
++	handler->id_table = baikal_vdu_input_ids;
++
++	ret = input_register_handler(handler);
++	if (ret) {
++		dev_err(dev, "failed to register input handler\n");
++		goto out;
++	}
++
++	/* Hold PWM Clock Domain Reset, disable clocking */
++	VDU_WRITE(priv, PWMFR, 0);
++
++	rate = clk_get_rate(priv->clk);
++	pwmfr |= PWMFR_PWMFCD(rate / pwm_frequency - 1) | PWMFR_PWMFCI;
++	VDU_WRITE(priv, PWMFR, pwmfr);
++
++	/* Release PWM Clock Domain Reset, enable clocking */
++	VDU_WRITE(priv, PWMFR, pwmfr | PWMFR_PWMPCR | PWMFR_PWMFCE);
++
++	backlight_update_status(priv->bl_dev);
++out:
++	of_node_put(node);
++	return ret;
++}
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_connector.c b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+new file mode 100644
+index 00000000000..80600190287
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+@@ -0,0 +1,195 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * Copyright (c) 2006-2008 Intel Corporation
++ * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
++ * Copyright (C) 2011 Texas Instruments
++ * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
++ */
++
++/**
++ * baikal_vdu_connector.c
++ * Implementation of the connector functions for Baikal Electronics
++ * BE-M1000 SoC's VDU
++ */
++
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_panel.h>
++#include <drm/drm_probe_helper.h>
++
++#include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
++
++static void baikal_vdu_connector_destroy(struct drm_connector *connector)
++{
++	drm_connector_unregister(connector);
++	drm_connector_cleanup(connector);
++}
++
++static void baikal_vdu_connector_force(struct drm_connector *connector)
++{
++	struct baikal_vdu_private *priv = to_baikal_vdu_private(connector);
++	u32 cntl = VDU_READ(priv, CR1);
++	if (connector->force == DRM_FORCE_OFF)
++		cntl &= ~CR1_LCE;
++	else
++		cntl |= CR1_LCE;
++	VDU_WRITE(priv, CR1, cntl);
++}
++
++static enum drm_connector_status baikal_vdu_connector_detect(
++		struct drm_connector *connector, bool force)
++{
++	struct baikal_vdu_private *priv =
++		to_baikal_vdu_private(connector);
++
++	return (priv->panel ?
++		connector_status_connected :
++		connector_status_disconnected);
++}
++
++static int baikal_vdu_connector_helper_get_modes(
++		struct drm_connector *connector)
++{
++	struct baikal_vdu_private *priv =
++		to_baikal_vdu_private(connector);
++
++	if (!priv->panel)
++		return 0;
++
++	return drm_panel_get_modes(priv->panel, connector);
++}
++
++int baikal_vdu_lvds_set_property(struct drm_connector *connector,
++				       struct drm_property *property,
++				       uint64_t value)
++{
++	struct drm_encoder *encoder = connector->encoder;
++
++	if (!encoder)
++		return -1;
++
++	if (!strcmp(property->name, "scaling mode")) {
++		uint64_t curval;
++		switch (value) {
++		case DRM_MODE_SCALE_FULLSCREEN:
++			break;
++		case DRM_MODE_SCALE_NO_SCALE:
++			break;
++		case DRM_MODE_SCALE_ASPECT:
++			break;
++		default:
++			goto set_prop_error;
++		}
++
++		if (drm_object_property_get_value(&connector->base,
++						     property,
++						     &curval))
++			goto set_prop_error;
++
++		if (curval == value)
++			goto set_prop_done;
++
++		if (drm_object_property_set_value(&connector->base,
++							property,
++							value))
++			goto set_prop_error;
++
++	} else if (!strcmp(property->name, "backlight")) {
++		if (drm_object_property_set_value(&connector->base,
++							property,
++							value))
++			goto set_prop_error;
++		else {
++			// TBD set backlight
++		}
++	} else if (!strcmp(property->name, "DPMS")) {
++		const struct drm_encoder_helper_funcs *hfuncs
++						= encoder->helper_private;
++		hfuncs->dpms(encoder, value);
++	}
++
++set_prop_done:
++	return 0;
++set_prop_error:
++	return -1;
++}
++
++static void baikal_vdu_lvds_encoder_dpms(struct drm_encoder *encoder, int mode)
++{
++	// TBD
++}
++
++static const struct drm_connector_funcs connector_funcs = {
++	//.dpms = drm_atomic_helper_connector_dpms, // TODO sort this out
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.detect = baikal_vdu_connector_detect,
++	.reset = drm_atomic_helper_connector_reset,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++	.set_property = baikal_vdu_lvds_set_property,
++	.destroy = baikal_vdu_connector_destroy,
++	.force = baikal_vdu_connector_force,
++};
++
++static const struct drm_connector_helper_funcs connector_helper_funcs = {
++	.get_modes = baikal_vdu_connector_helper_get_modes,
++};
++
++static const struct drm_encoder_funcs encoder_funcs = {
++	.destroy = drm_encoder_cleanup,
++};
++
++static const struct drm_encoder_helper_funcs baikal_vdu_lvds_helper_funcs = {
++	.dpms = baikal_vdu_lvds_encoder_dpms,
++	//.prepare = TBD,
++	//.mode_set = TBD,
++	//.commit = TBD,
++};
++
++int baikal_vdu_lvds_connector_create(struct drm_device *dev)
++{
++	struct baikal_vdu_private *priv = dev->dev_private;
++	struct drm_connector *connector = &priv->connector;
++	struct drm_encoder *encoder = &priv->encoder;
++	int ret;
++
++	ret = drm_connector_init(dev, connector, &connector_funcs,
++			DRM_MODE_CONNECTOR_LVDS);
++	if (ret) {
++		dev_err(dev->dev, "drm_connector_init failed: %d\n", ret);
++		goto end;
++	}
++	drm_connector_helper_add(connector, &connector_helper_funcs);
++
++	ret = drm_encoder_init(dev, encoder, &encoder_funcs,
++			DRM_MODE_ENCODER_LVDS, NULL);
++	if (ret) {
++		dev_err(dev->dev, "drm_encoder_init failed: %d\n", ret);
++		goto end;
++	}
++	drm_encoder_helper_add(encoder, &baikal_vdu_lvds_helper_funcs);
++
++	encoder->crtc = &priv->crtc;
++	encoder->possible_crtcs = drm_crtc_mask(encoder->crtc);
++
++	ret = drm_connector_attach_encoder(connector, encoder);
++	if (ret) {
++		dev_err(dev->dev, "drm_connector_attach_encoder failed: %d\n", ret);
++		goto end;
++	}
++
++	ret = drm_connector_register(connector);
++	if (ret) {
++		dev_err(dev->dev, "drm_connector_register failed: %d\n", ret);
++		goto end;
++	}
++
++ end:
++	return ret;
++}
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+new file mode 100644
+index 00000000000..bc452770551
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+@@ -0,0 +1,352 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * Copyright (c) 2006-2008 Intel Corporation
++ * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
++ * Copyright (C) 2011 Texas Instruments
++ * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
++ *
++ * This program is free software and is provided to you under the terms of the
++ * GNU General Public License version 2 as published by the Free Software
++ * Foundation, and any use by you of this program is subject to the terms of
++ * such GNU licence.
++ *
++ */
++
++/**
++ * baikal_vdu_irq.c
++ * Implementation of the IRQ functions for Baikal Electronics BE-M1000 VDU driver
++ */
++#include <linux/clk.h>
++#include <linux/clk-provider.h>
++#include <linux/version.h>
++#include <linux/shmem_fs.h>
++#include <linux/dma-buf.h>
++
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_crtc_helper.h>
++#include <drm/drm_panel.h>
++#include <drm/drm_vblank.h>
++
++#include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
++
++struct baikal_vdu_crtc_mode_fixup {
++	int vdisplay;
++	int vfp_add;
++};
++
++static const struct baikal_vdu_crtc_mode_fixup mode_fixups[] = {
++	{ 480, 38 },
++	{ 600, 8 },
++	{ 720, 43 },
++	{ 768, 43 },
++	{ 800, 71 },
++	{ 864, 71 },
++	{ 900, 71 },
++	{ 960, 71 },
++	{ 1024, 25 },
++	{ 1050, 25 },
++	{ 1080, 8 },
++	{ 1200, 32 },
++	{ 1440, 27 },
++	{ ~0U },
++};
++
++bool baikal_vdu_crtc_mode_fixup(struct drm_crtc *crtc,
++					const struct drm_display_mode *mode,
++					struct drm_display_mode *adjusted_mode)
++{
++	struct baikal_vdu_private *priv = crtc->dev->dev_private;
++
++	memcpy(adjusted_mode, mode, sizeof(*mode));
++
++	if (!priv->mode_fixup)
++		return true;
++
++	if (priv->mode_fixup == -1) {
++		const struct baikal_vdu_crtc_mode_fixup *fixups = mode_fixups;
++		for (; fixups && fixups->vdisplay != ~0U; ++fixups) {
++			if (mode->vdisplay <= fixups->vdisplay)
++				break;
++		}
++		if (fixups->vdisplay == ~0U)
++			return true;
++		else
++			priv->mode_fixup = fixups->vfp_add;
++	}
++
++	adjusted_mode->vtotal += priv->mode_fixup;
++	adjusted_mode->vsync_start += priv->mode_fixup;
++	adjusted_mode->vsync_end += priv->mode_fixup;
++	adjusted_mode->clock = mode->clock * adjusted_mode->vtotal / mode->vtotal;
++
++	return true;
++}
++
++static void baikal_vdu_crtc_helper_mode_set_nofb(struct drm_crtc *crtc)
++{
++	struct drm_device *dev = crtc->dev;
++	struct baikal_vdu_private *priv = dev->dev_private;
++	const struct drm_display_mode *orig_mode = &crtc->state->mode;
++	const struct drm_display_mode *mode = &crtc->state->adjusted_mode;
++	unsigned long rate;
++	unsigned int ppl, hsw, hfp, hbp;
++	unsigned int lpp, vsw, vfp, vbp;
++	unsigned int reg;
++	int ret = 0;
++
++	drm_mode_debug_printmodeline(orig_mode);
++	drm_mode_debug_printmodeline(mode);
++
++	rate = mode->clock * 1000;
++
++	if (rate != clk_get_rate(priv->clk)) {
++		DRM_DEV_DEBUG_DRIVER(dev->dev, "Requested pixel clock is %lu Hz\n", rate);
++
++		/* hold clock domain reset; disable clocking */
++		VDU_WRITE(priv, PCTR, 0);
++
++		if (__clk_is_enabled(priv->clk))
++			clk_disable_unprepare(priv->clk);
++		ret = clk_set_rate(priv->clk, rate);
++
++		if (ret >= 0) {
++			clk_prepare_enable(priv->clk);
++			if (!__clk_is_enabled(priv->clk))
++				ret = -1;
++		}
++
++		/* release clock domain reset; enable clocking */
++		reg = VDU_READ(priv, PCTR);
++		reg |= PCTR_PCR + PCTR_PCI;
++		VDU_WRITE(priv, PCTR, reg);
++	}
++
++	if (ret < 0)
++		DRM_ERROR("Cannot set desired pixel clock (%lu Hz)\n", rate);
++
++	ppl = mode->hdisplay / 16;
++	if (priv->type == VDU_TYPE_LVDS) {
++		if (priv->panel && priv->ep_count == 2) {
++			hsw = mode->hsync_end - mode->hsync_start;
++			hfp = mode->hsync_start - mode->hdisplay - 1;
++		} else {
++			hsw = mode->hsync_end - mode->hsync_start - 1;
++			hfp = mode->hsync_start - mode->hdisplay;
++		}
++		hbp = mode->htotal - mode->hsync_end;
++	} else {
++		hsw = mode->hsync_end - mode->hsync_start - 1;
++		hfp = mode->hsync_start - mode->hdisplay - 1;
++		hbp = mode->htotal - mode->hsync_end - 1;
++	}
++
++	lpp = mode->vdisplay;
++	vsw = mode->vsync_end - mode->vsync_start;
++	vfp = mode->vsync_start - mode->vdisplay;
++	vbp = mode->vtotal - mode->vsync_end;
++
++	VDU_WRITE(priv, HTR,
++			(HTR_HFP(hfp) & HTR_HFP_MASK) |
++			(HTR_PPL(ppl) & HTR_PPL_MASK) |
++			(HTR_HBP(hbp) & HTR_HBP_MASK) |
++			(HTR_HSW(hsw) & HTR_HSW_MASK));
++
++	if (mode->hdisplay > 4080 || ppl * 16 != mode->hdisplay)
++		VDU_WRITE(priv, HPPLOR,
++			  (HPPLOR_HPPLO(mode->hdisplay) & HPPLOR_HPPLO_MASK) |
++				 HPPLOR_HPOE);
++
++	VDU_WRITE(priv, VTR1,
++			(VTR1_VSW(vsw) & VTR1_VSW_MASK) |
++			(VTR1_VFP(vfp) & VTR1_VFP_MASK) |
++			(VTR1_VBP(vbp) & VTR1_VBP_MASK));
++
++	VDU_WRITE(priv, VTR2, lpp & VTR2_LPP_MASK);
++
++	VDU_WRITE(priv, HVTER,
++			(HVTER_VSWE(vsw >> VTR1_VSW_LSB_WIDTH) & HVTER_VSWE_MASK) |
++			(HVTER_HSWE(hsw >> HTR_HSW_LSB_WIDTH) & HVTER_HSWE_MASK) |
++			(HVTER_VBPE(vbp >> VTR1_VBP_LSB_WIDTH) & HVTER_VBPE_MASK) |
++			(HVTER_VFPE(vfp >> VTR1_VFP_LSB_WIDTH) & HVTER_VFPE_MASK) |
++			(HVTER_HBPE(hbp >> HTR_HBP_LSB_WIDTH) & HVTER_HBPE_MASK) |
++			(HVTER_HFPE(hfp >> HTR_HFP_LSB_WIDTH) & HVTER_HFPE_MASK));
++
++	/* Set polarities */
++	reg = VDU_READ(priv, CR1);
++	if (mode->flags & DRM_MODE_FLAG_NHSYNC)
++		reg |= CR1_HSP;
++	else
++		reg &= ~CR1_HSP;
++	reg &= ~CR1_VSP; // always set VSP to active high
++	reg |= CR1_DEP; // set DE to active high;
++	VDU_WRITE(priv, CR1, reg);
++
++	crtc->hwmode = crtc->state->adjusted_mode;
++}
++
++static enum drm_mode_status baikal_vdu_mode_valid(struct drm_crtc *crtc,
++	                const struct drm_display_mode *mode)
++{
++	struct baikal_vdu_private *priv = crtc->dev->dev_private;
++	if (!priv->mode_override && (mode->hdisplay > 2560 ||
++			mode->vdisplay > 1440))
++		return MODE_BAD;
++	else
++		return MODE_OK;
++}
++
++static void baikal_vdu_crtc_helper_enable(struct drm_crtc *crtc,
++					  struct drm_atomic_state *old_state)
++{
++	struct baikal_vdu_private *priv = crtc->dev->dev_private;
++	struct drm_panel *panel = priv->panel;
++	struct device_node *panel_node;
++	const char *data_mapping;
++	u32 cntl, gpio;
++
++	DRM_DEV_DEBUG_DRIVER(crtc->dev->dev, "enabling pixel clock\n");
++	clk_prepare_enable(priv->clk);
++
++	drm_panel_prepare(panel);
++
++	VDU_WRITE(priv, ISCR, ISCR_VSC_VFP);
++
++	/* Set 16-word input FIFO watermark */
++	/* Enable and Power Up */
++	cntl = VDU_READ(priv, CR1);
++	cntl &= ~(CR1_FDW_MASK | CR1_OPS_MASK);
++	cntl |= CR1_LCE | CR1_FDW_16_WORDS;
++
++	if (priv->type == VDU_TYPE_LVDS) {
++		panel_node = panel->dev->of_node;
++		if (of_property_read_string(panel_node, "data-mapping", &data_mapping)) {
++			cntl |= CR1_OPS_LCD18;
++		} else if (!strncmp(data_mapping, "vesa-24", 7))
++			cntl |= CR1_OPS_LCD24;
++		else if (!strncmp(data_mapping, "jeida-18", 8))
++			cntl |= CR1_OPS_LCD18;
++		else {
++			dev_warn(crtc->dev->dev, "%s data mapping is not supported, vesa-24 is set\n", data_mapping);
++			cntl |= CR1_OPS_LCD24;
++		}
++		gpio = GPIOR_UHD_ENB;
++		if (priv->ep_count == 4)
++			gpio |= GPIOR_UHD_QUAD_PORT;
++		else if (priv->ep_count == 2)
++			gpio |= GPIOR_UHD_DUAL_PORT;
++		else
++			gpio |= GPIOR_UHD_SNGL_PORT;
++		VDU_WRITE(priv, GPIOR, gpio);
++	} else
++		cntl |= CR1_OPS_LCD24;
++	VDU_WRITE(priv, CR1, cntl);
++
++	drm_panel_enable(priv->panel);
++	drm_crtc_vblank_on(crtc);
++}
++
++void baikal_vdu_crtc_helper_disable(struct drm_crtc *crtc)
++{
++	struct baikal_vdu_private *priv = crtc->dev->dev_private;
++
++	drm_panel_disable(priv->panel);
++
++	drm_panel_unprepare(priv->panel);
++	drm_crtc_vblank_off(crtc);
++
++	/* Disable clock */
++	DRM_DEV_DEBUG_DRIVER(crtc->dev->dev, "disabling pixel clock\n");
++	clk_disable_unprepare(priv->clk);
++}
++
++static void baikal_vdu_crtc_helper_atomic_flush(struct drm_crtc *crtc,
++					   struct drm_atomic_state *old_state)
++{
++	struct drm_pending_vblank_event *event = crtc->state->event;
++
++	if (event) {
++		crtc->state->event = NULL;
++
++		spin_lock_irq(&crtc->dev->event_lock);
++		if (crtc->state->active && drm_crtc_vblank_get(crtc) == 0)
++			drm_crtc_arm_vblank_event(crtc, event);
++		else
++			drm_crtc_send_vblank_event(crtc, event);
++		spin_unlock_irq(&crtc->dev->event_lock);
++	}
++}
++
++int baikal_vdu_enable_vblank(struct drm_crtc *crtc)
++{
++	struct baikal_vdu_private *priv = crtc->dev->dev_private;
++	u32 irq_mask;
++
++	/* clear interrupt status */
++	VDU_WRITE(priv, ISR, INTR_MASK);
++
++	irq_mask = VDU_READ(priv, IMR);
++  irq_mask |= INTR_VCT;
++	VDU_WRITE(priv, IMR, irq_mask);
++
++	return 0;
++}
++
++void baikal_vdu_disable_vblank(struct drm_crtc *crtc)
++{
++	struct baikal_vdu_private *priv = crtc->dev->dev_private;
++	u32 irq_mask;
++
++	/* clear interrupt status */
++	VDU_WRITE(priv, ISR, INTR_MASK);
++
++	irq_mask = VDU_READ(priv, IMR);
++  irq_mask &= ~INTR_VCT;
++	VDU_WRITE(priv, IMR, irq_mask);
++}
++
++static const struct drm_crtc_funcs crtc_funcs = {
++	.set_config = drm_atomic_helper_set_config,
++	.page_flip = drm_atomic_helper_page_flip,
++	.reset = drm_atomic_helper_crtc_reset,
++	.destroy = drm_crtc_cleanup,
++	.atomic_duplicate_state = drm_atomic_helper_crtc_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_crtc_destroy_state,
++	.enable_vblank = baikal_vdu_enable_vblank,
++	.disable_vblank = baikal_vdu_disable_vblank,
++};
++
++static const struct drm_crtc_helper_funcs crtc_helper_funcs = {
++	.mode_fixup = baikal_vdu_crtc_mode_fixup,
++	.mode_set_nofb = baikal_vdu_crtc_helper_mode_set_nofb,
++	.mode_valid = baikal_vdu_mode_valid,
++	.atomic_flush = baikal_vdu_crtc_helper_atomic_flush,
++	.disable = baikal_vdu_crtc_helper_disable,
++	.atomic_enable = baikal_vdu_crtc_helper_enable,
++};
++
++int baikal_vdu_crtc_create(struct drm_device *dev)
++{
++	struct baikal_vdu_private *priv = dev->dev_private;
++	struct drm_crtc *crtc = &priv->crtc;
++
++	drm_crtc_init_with_planes(dev, crtc,
++				  &priv->primary, NULL,
++				  &crtc_funcs, "primary");
++	drm_crtc_helper_add(crtc, &crtc_helper_funcs);
++
++	/* XXX: The runtime clock disabling still results in
++	 * occasional system hangs, and needs debugging.
++	 */
++
++	DRM_DEV_DEBUG_DRIVER(crtc->dev->dev, "enabling pixel clock\n");
++	clk_prepare_enable(priv->clk);
++
++	return 0;
++}
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c b/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
+new file mode 100644
+index 00000000000..f888eac3a09
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
+@@ -0,0 +1,134 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ *  Copyright © 2017 Broadcom
++ */
++
++#include <linux/seq_file.h>
++#include <linux/device.h>
++#include <drm/drm_debugfs.h>
++#include <drm/drm_device.h>
++#include <drm/drm_file.h>
++
++#include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
++
++#define REGDEF(reg) { reg, #reg }
++static const struct {
++	u32 reg;
++	const char *name;
++} baikal_vdu_reg_defs[] = {
++	REGDEF(CR1),
++	REGDEF(HTR),
++	REGDEF(VTR1),
++	REGDEF(VTR2),
++	REGDEF(PCTR),
++	REGDEF(ISR),
++	REGDEF(IMR),
++	REGDEF(IVR),
++	REGDEF(ISCR),
++	REGDEF(DBAR),
++	REGDEF(DCAR),
++	REGDEF(DEAR),
++#if defined(CONFIG_DRM_BAIKAL_VDU_BACKLIGHT)
++	REGDEF(PWMFR),
++	REGDEF(PWMDCR),
++#endif
++	REGDEF(HVTER),
++	REGDEF(HPPLOR),
++	REGDEF(GPIOR),
++	REGDEF(OWER),
++	REGDEF(OWXSER0),
++	REGDEF(OWYSER0),
++	REGDEF(OWDBAR0),
++	REGDEF(OWDCAR0),
++	REGDEF(OWDEAR0),
++	REGDEF(OWXSER1),
++	REGDEF(OWYSER1),
++	REGDEF(OWDBAR1),
++	REGDEF(OWDCAR1),
++	REGDEF(OWDEAR1),
++	REGDEF(MRR),
++};
++
++int baikal_vdu_debugfs_regs(struct seq_file *m, void *unused)
++{
++	struct drm_info_node *node = (struct drm_info_node *)m->private;
++	struct drm_device *dev = node->minor->dev;
++	struct baikal_vdu_private *priv = dev->dev_private;
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(baikal_vdu_reg_defs); i++) {
++		seq_printf(m, "%s (0x%04x): 0x%08x\n",
++			   baikal_vdu_reg_defs[i].name, baikal_vdu_reg_defs[i].reg,
++			   VDU_READ(priv, baikal_vdu_reg_defs[i].reg));
++	}
++
++	for (i = 0; i < ARRAY_SIZE(priv->counters); i++) {
++		seq_printf(m, "COUNTER[%d]: 0x%08x\n", i, priv->counters[i]);
++	}
++
++	return 0;
++}
++
++static ssize_t baikal_vdu_rg_read(struct file *file,
++		char __user *user_buf, size_t count, loff_t *ppos)
++{
++	char *filename = file->f_path.dentry->d_iname;
++	struct baikal_vdu_private *priv = file->f_inode->i_private;
++	char buf[16];
++	int len = 0;
++
++	if (!strcmp("htr", filename))
++		len = snprintf(buf, sizeof(buf), "%x\n", VDU_READ(priv, HTR));
++	else if (!strcmp("vtr", filename))
++		len = snprintf(buf, sizeof(buf), "%x\n", VDU_READ(priv, VTR1));
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static ssize_t baikal_vdu_rg_write(struct file *file,
++		const char __user *buf, size_t count, loff_t *ppos)
++{
++	struct baikal_vdu_private *priv = file->f_inode->i_private;
++	char *filename = file->f_path.dentry->d_iname;
++	u32 val;
++	int ret;
++
++	ret = kstrtouint_from_user(buf, count, 16, &val);
++	if (ret)
++		return ret;
++
++	if (!strcmp("htr", filename))
++		VDU_WRITE(priv, HTR, val);
++	else if (!strcmp("vtr", filename))
++		VDU_WRITE(priv, VTR1, val);
++
++	return count;
++}
++
++static const struct file_operations baikal_vdu_rg_fops = {
++	.owner = THIS_MODULE,
++	.open = simple_open,
++	.write = baikal_vdu_rg_write,
++	.read = baikal_vdu_rg_read,
++};
++
++static const struct drm_info_list baikal_vdu_debugfs_list[] = {
++	{"regs", baikal_vdu_debugfs_regs, 0},
++};
++
++void baikal_vdu_debugfs_init(struct drm_minor *minor)
++{
++	struct drm_device *dev = minor->dev;
++	struct baikal_vdu_private *priv = dev->dev_private;
++	debugfs_create_file("htr", S_IWUSR, minor->debugfs_root, priv, &baikal_vdu_rg_fops);
++	debugfs_create_file("vtr", S_IWUSR, minor->debugfs_root, priv, &baikal_vdu_rg_fops);
++	drm_debugfs_create_files(baikal_vdu_debugfs_list,
++					ARRAY_SIZE(baikal_vdu_debugfs_list),
++					minor->debugfs_root, minor);
++}
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drm.h b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+new file mode 100644
+index 00000000000..8e8c6216c16
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+@@ -0,0 +1,100 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * Copyright (c) 2006-2008 Intel Corporation
++ * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
++ * Copyright (C) 2011 Texas Instruments
++ * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
++ */
++
++#ifndef __BAIKAL_VDU_DRM_H__
++#define __BAIKAL_VDU_DRM_H__
++
++#include <drm/drm_gem.h>
++#include <drm/drm_simple_kms_helper.h>
++#include <linux/workqueue.h>
++
++#if defined(CONFIG_DRM_BAIKAL_VDU_BACKLIGHT)
++#include <linux/gpio.h>
++#include <linux/backlight.h>
++#endif
++
++/* Append new drm mode definition here, align with libdrm definition */
++#define DRM_MODE_SCALE_NO_SCALE	2
++
++#define VDU_TYPE_HDMI	0
++#define VDU_TYPE_LVDS	1
++
++#define to_baikal_vdu_private(x) \
++	container_of(x, struct baikal_vdu_private, connector)
++
++struct baikal_vdu_private {
++	struct drm_device *drm;
++	unsigned int irq;
++	struct drm_crtc crtc;
++	struct drm_connector connector;
++	struct drm_encoder encoder;
++	struct drm_panel *panel;
++	struct drm_bridge *bridge;
++	struct drm_plane primary;
++	void *regs;
++	struct clk *clk;
++	spinlock_t lock;
++	u32 counters[20];
++	int mode_fixup;
++	int mode_override;
++	int type;
++	int ep_count;
++	u32 fb_addr;
++	u32 fb_end;
++	struct delayed_work update_work;
++
++#if defined(CONFIG_DRM_BAIKAL_VDU_BACKLIGHT)
++	/* backlight */
++	struct gpio_desc *enable_gpio;
++	struct backlight_device *bl_dev;
++
++	int min_brightness;
++	int brightness_step;
++
++	bool brightness_on;
++#endif
++};
++
++/* CRTC Functions */
++int baikal_vdu_crtc_create(struct drm_device *dev);
++
++/* IRQ functions */
++void baikal_vdu_irq_enable(struct drm_device *dev);
++void baikal_vdu_irq_disable(struct drm_device *dev);
++int baikal_vdu_irq_install(struct drm_device *dev, int irq);
++void baikal_vdu_irq_uninstall(struct drm_device *dev);
++
++int baikal_vdu_primary_plane_init(struct drm_device *dev);
++
++/* Connector Functions */
++int baikal_vdu_lvds_connector_create(struct drm_device *dev);
++
++#if defined(CONFIG_DRM_BAIKAL_VDU_BACKLIGHT)
++/* Backlight Functions */
++int baikal_vdu_backlight_create(struct drm_device *drm);
++#endif
++
++#if defined(CONFIG_DEBUG_FS)
++/* Debugfs functions */
++void baikal_vdu_debugfs_init(struct drm_minor *minor);
++#endif
++
++/* Worker functions */
++void baikal_vdu_update_work(struct work_struct *work);
++
++/* Register helpers */
++#define VDU_READ(priv, reg) readl((priv)->regs + (reg))
++#define VDU_WRITE(priv, reg, val) writel((val), (priv)->regs + (reg))
++
++#endif /* __BAIKAL_VDU_DRM_H__ */
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drv.c b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+new file mode 100644
+index 00000000000..0b5174e6d51
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+@@ -0,0 +1,378 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ * All bugs by Alexey Sheplyakov <asheplyakov@altlinux.org>
++ *
++ * This driver is based on ARM PL111 DRM driver
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * Copyright (c) 2006-2008 Intel Corporation
++ * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
++ * Copyright (C) 2011 Texas Instruments
++ * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
++ */
++
++#include <linux/arm-smccc.h>
++#include <linux/irq.h>
++#include <linux/clk.h>
++#include <linux/version.h>
++#include <linux/shmem_fs.h>
++#include <linux/dma-buf.h>
++#include <linux/module.h>
++#include <linux/of_graph.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/workqueue.h>
++
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_bridge.h>
++#include <drm/drm_connector.h>
++#include <drm/drm_crtc_helper.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_gem_cma_helper.h>
++#include <drm/drm_fb_cma_helper.h>
++#include <drm/drm_fb_helper.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_of.h>
++#include <drm/drm_probe_helper.h>
++#include <drm/drm_vblank.h>
++
++#include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
++
++#define DRIVER_NAME                 "baikal-vdu"
++#define DRIVER_DESC                 "DRM module for Baikal VDU"
++#define DRIVER_DATE                 "20210129"
++
++#define BAIKAL_SMC_SCP_LOG_DISABLE  0x82000200
++
++int mode_fixup = 0;
++int mode_override = 0;
++
++static const struct drm_mode_config_funcs mode_config_funcs = {
++	.fb_create = drm_gem_fb_create,
++	.atomic_check = drm_atomic_helper_check,
++	.atomic_commit = drm_atomic_helper_commit,
++};
++
++static const struct drm_encoder_funcs baikal_vdu_encoder_funcs = {
++	.destroy = drm_encoder_cleanup,
++};
++
++/* Walks the OF graph to find the endpoint node and then asks DRM
++ * to look up the panel or the bridge connected to the node found
++ */
++int baikal_vdu_find_panel_or_bridge(struct device *dev,
++		struct drm_panel **panel, struct drm_bridge **bridge)
++{
++	struct device_node *endpoint = NULL;
++	struct device_node *remote;
++	struct device_node *old_remote = NULL;
++	struct device_node *np = dev->of_node;
++	struct drm_device *drm = dev_get_drvdata(dev);
++	struct baikal_vdu_private *priv = drm->dev_private;
++	int ep_count = 0;
++
++	for_each_endpoint_of_node(np, endpoint) {
++
++		remote = of_graph_get_remote_port_parent(endpoint);
++		if (old_remote && remote != old_remote) {
++			dev_err(dev, "all endpoints must be connected to the same panel or bridge %d\n", ep_count);
++			of_node_put(endpoint);
++			return -EINVAL;
++		}
++
++		/* don't proceed if we have an endpoint but no panel node
++		 * or bridge node tied to it */
++		if (!remote) {
++			dev_err(dev, "no valid remote node connected to the endpoint@%d\n", ep_count);
++			of_node_put(endpoint);
++			return -EINVAL;
++		}
++
++		ep_count++;
++		of_node_put(remote);
++		old_remote = remote;
++	}
++
++	if (!ep_count) {
++		dev_err(dev, "no endpoints found connected either to panel or bridge\n");
++		return -EINVAL;
++	}
++
++	if (!of_device_is_available(remote)) {
++		dev_err(dev, "not available for remote node\n");
++		return -EINVAL;
++	}
++
++	priv->ep_count = ep_count;
++
++	return drm_of_find_panel_or_bridge(np, 0, 0, panel, bridge);
++}
++
++static int baikal_vdu_remove_efifb(struct drm_device *dev)
++{
++	int err;
++
++#if IS_REACHABLE(CONFIG_FB)
++	err = remove_conflicting_framebuffers(NULL, "baikal-vdudrmfb", false);
++
++	if (err)
++		dev_warn(dev->dev, "failed to remove firmware framebuffer\n");
++#else
++	err = 0;
++#endif
++
++	return err;
++}
++
++static int vdu_modeset_init(struct drm_device *dev)
++{
++	struct drm_mode_config *mode_config;
++	struct baikal_vdu_private *priv = dev->dev_private;
++	struct drm_encoder *encoder;
++	struct arm_smccc_res res;
++	int ret = 0;
++
++	if (priv == NULL)
++		return -EINVAL;
++
++	drm_mode_config_init(dev);
++	mode_config = &dev->mode_config;
++	mode_config->funcs = &mode_config_funcs;
++	mode_config->min_width = 1;
++	mode_config->max_width = 4095;
++	mode_config->min_height = 1;
++	mode_config->max_height = 4095;
++
++	ret = baikal_vdu_primary_plane_init(dev);
++	if (ret != 0) {
++		dev_err(dev->dev, "Failed to init primary plane\n");
++		goto out_config;
++	}
++
++	ret = baikal_vdu_crtc_create(dev);
++	if (ret) {
++		dev_err(dev->dev, "Failed to create crtc\n");
++		goto out_config;
++	}
++
++	ret = baikal_vdu_find_panel_or_bridge(dev->dev, &priv->panel, &priv->bridge);
++	if (ret == -EPROBE_DEFER) {
++		dev_info(dev->dev, "Bridge probe deferred\n");
++		goto out_config;
++	}
++
++	if (priv->bridge) {
++		encoder = &priv->encoder;
++		ret = drm_encoder_init(dev, encoder, &baikal_vdu_encoder_funcs,
++				       DRM_MODE_ENCODER_NONE, NULL);
++		if (ret) {
++			dev_err(dev->dev, "Failed to create DRM encoder\n");
++			goto out_config;
++		}
++		encoder->crtc = &priv->crtc;
++		encoder->possible_crtcs = drm_crtc_mask(encoder->crtc);
++		priv->bridge->encoder = encoder;
++		ret = drm_bridge_attach(encoder, priv->bridge, NULL, 0);
++		if (ret) {
++			dev_err(dev->dev, "Failed to attach DRM bridge %d\n", ret);
++			goto out_config;
++		}
++	} else if (priv->panel) {
++		ret = baikal_vdu_lvds_connector_create(dev);
++		if (ret) {
++			dev_err(dev->dev, "Failed to create DRM connector\n");
++			goto out_config;
++		}
++	} else
++		ret = -EINVAL;
++
++	if (ret) {
++		dev_err(dev->dev, "No bridge or panel attached!\n");
++		goto out_config;
++	}
++
++	priv->clk = clk_get(dev->dev, "pclk");
++	if (IS_ERR(priv->clk)) {
++		dev_err(dev->dev, "fatal: unable to get pclk, err %ld\n", PTR_ERR(priv->clk));
++		ret = PTR_ERR(priv->clk);
++		goto out_config;
++	}
++
++	priv->mode_fixup = mode_fixup;
++	priv->mode_override = mode_override;
++
++	baikal_vdu_remove_efifb(dev);
++
++	ret = drm_vblank_init(dev, 1);
++	if (ret != 0) {
++		dev_err(dev->dev, "Failed to init vblank\n");
++		goto out_clk;
++	}
++
++	arm_smccc_smc(BAIKAL_SMC_SCP_LOG_DISABLE, 0, 0, 0, 0, 0, 0, 0, &res);
++	INIT_DEFERRABLE_WORK(&priv->update_work,
++			     baikal_vdu_update_work);
++
++	drm_mode_config_reset(dev);
++
++	drm_kms_helper_poll_init(dev);
++
++	ret = drm_dev_register(dev, 0);
++	if (ret)
++		goto out_clk;
++
++	drm_fbdev_generic_setup(dev, 32);
++	goto finish;
++
++out_clk:
++	clk_put(priv->clk);
++out_config:
++	drm_mode_config_cleanup(dev);
++finish:
++	return ret;
++}
++
++DEFINE_DRM_GEM_CMA_FOPS(drm_fops);
++
++static const struct drm_driver vdu_drm_driver = {
++	.driver_features = DRIVER_GEM |	DRIVER_MODESET | DRIVER_ATOMIC,
++	.ioctls = NULL,
++	.fops = &drm_fops,
++	.name = DRIVER_NAME,
++	.desc = DRIVER_DESC,
++	.date = DRIVER_DATE,
++	.major = 1,
++	.minor = 0,
++	.patchlevel = 0,
++	DRM_GEM_CMA_DRIVER_OPS,
++#if defined(CONFIG_DEBUG_FS)
++	.debugfs_init = baikal_vdu_debugfs_init,
++#endif
++};
++
++static int baikal_vdu_drm_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct baikal_vdu_private *priv;
++	struct drm_device *drm;
++	struct resource *mem;
++	int irq;
++	int ret;
++
++	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++	priv->fb_end = 0;
++
++	drm = drm_dev_alloc(&vdu_drm_driver, dev);
++	if (IS_ERR(drm))
++		return PTR_ERR(drm);
++	platform_set_drvdata(pdev, drm);
++	priv->drm = drm;
++	drm->dev_private = priv;
++
++	if (!(mem = platform_get_resource(pdev, IORESOURCE_MEM, 0))) {
++		dev_err(dev, "%s no MMIO resource specified\n", __func__);
++		return -EINVAL;
++	}
++
++	priv->regs = devm_ioremap_resource(dev, mem);
++	if (IS_ERR(priv->regs)) {
++		dev_err(dev, "%s MMIO allocation failed\n", __func__);
++		return PTR_ERR(priv->regs);
++	}
++
++	/* turn off interrupts before requesting the irq */
++	VDU_WRITE(priv, IMR, 0);
++
++	irq = platform_get_irq(pdev, 0);
++	if (irq < 0) {
++		dev_err(dev, "%s no IRQ resource specified\n", __func__);
++		return -EINVAL;
++	}
++	priv->irq = irq;
++
++	spin_lock_init(&priv->lock);
++
++	ret = baikal_vdu_irq_install(drm, priv->irq);
++	if (ret != 0) {
++		dev_err(dev, "%s IRQ %d allocation failed\n", __func__, irq);
++		return ret;
++	}
++
++	if (pdev->dev.of_node && of_property_read_bool(pdev->dev.of_node, "lvds-out"))
++		priv->type = VDU_TYPE_LVDS;
++	else
++		priv->type = VDU_TYPE_HDMI;
++
++	ret = vdu_modeset_init(drm);
++	if (ret != 0) {
++		dev_err(dev, "Failed to init modeset\n");
++		goto dev_unref;
++	}
++
++#if defined(CONFIG_DRM_BAIKAL_VDU_BACKLIGHT)
++	ret = baikal_vdu_backlight_create(drm);
++	if (ret != 0) {
++		dev_err(dev, "Failed to create backlight\n");
++		goto backlight_failed;
++	}
++#endif
++
++	return 0;
++
++#if defined(CONFIG_DRM_BAIKAL_VDU_BACKLIGHT)
++backlight_failed:
++	drm_mode_config_cleanup(drm);
++#endif
++
++dev_unref:
++	baikal_vdu_irq_uninstall(drm);
++	drm->dev_private = NULL;
++	drm_dev_put(drm);
++	return ret;
++}
++
++static int baikal_vdu_drm_remove(struct platform_device *pdev)
++{
++	struct drm_device *drm = platform_get_drvdata(pdev);
++
++	drm_dev_unregister(drm);
++	drm_mode_config_cleanup(drm);
++	baikal_vdu_irq_uninstall(drm);
++	drm->dev_private = NULL;
++	drm_dev_put(drm);
++
++	return 0;
++}
++
++static const struct of_device_id baikal_vdu_of_match[] = {
++	{ .compatible = "baikal,vdu" },
++	{ },
++};
++MODULE_DEVICE_TABLE(of, baikal_vdu_of_match);
++
++static struct platform_driver baikal_vdu_platform_driver = {
++	.probe  = baikal_vdu_drm_probe,
++	.remove = baikal_vdu_drm_remove,
++	.driver = {
++		.name   = DRIVER_NAME,
++		.of_match_table = baikal_vdu_of_match,
++	},
++};
++
++module_param(mode_fixup, int, 0644);
++module_param(mode_override, int, 0644);
++
++module_platform_driver(baikal_vdu_platform_driver);
++
++MODULE_AUTHOR("Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>");
++MODULE_DESCRIPTION("Baikal Electronics BE-M1000 Video Display Unit (VDU) DRM Driver");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:" DRIVER_NAME);
++MODULE_SOFTDEP("pre: baikal_hdmi");
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_irq.c b/drivers/gpu/drm/baikal/baikal_vdu_irq.c
+new file mode 100644
+index 00000000000..7078177a575
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_irq.c
+@@ -0,0 +1,120 @@
++#include <linux/clk.h>
++#include <linux/clk-provider.h>
++#include <linux/version.h>
++#include <linux/shmem_fs.h>
++#include <linux/dma-buf.h>
++
++#include <drm/drm_drv.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_crtc_helper.h>
++#include <drm/drm_panel.h>
++#include <drm/drm_vblank.h>
++
++#include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
++
++static irqreturn_t baikal_vdu_irq(int irq, void *data)
++{
++	struct drm_device *drm = data;
++	struct baikal_vdu_private *priv = drm->dev_private;
++	irqreturn_t status = IRQ_NONE;
++	u32 raw_stat;
++	u32 irq_stat;
++
++	irq_stat = VDU_READ(priv, IVR);
++	raw_stat = VDU_READ(priv, ISR);
++
++	if (irq_stat & INTR_VCT) {
++		priv->counters[10]++;
++		drm_crtc_handle_vblank(&priv->crtc);
++		status = IRQ_HANDLED;
++	}
++
++	if (raw_stat & INTR_UFU) {
++		priv->counters[4]++;
++		status = IRQ_HANDLED;
++	}
++
++	if (raw_stat & INTR_IFO) {
++		priv->counters[5]++;
++		status = IRQ_HANDLED;
++	}
++
++	if (raw_stat & INTR_OFU) {
++		priv->counters[6]++;
++		status = IRQ_HANDLED;
++	}
++
++	if (irq_stat & INTR_FER) {
++		priv->counters[11]++;
++		priv->counters[12] = VDU_READ(priv, DBAR);
++		priv->counters[13] = VDU_READ(priv, DCAR);
++		priv->counters[14] = VDU_READ(priv, MRR);
++		status = IRQ_HANDLED;
++	}
++
++	priv->counters[3] |= raw_stat;
++
++	/* Clear all interrupts */
++	VDU_WRITE(priv, ISR, raw_stat);
++
++	return status;
++}
++
++static void baikal_vdu_irq_prepare(struct drm_device *dev)
++{
++  struct baikal_vdu_private *priv = dev->dev_private;
++
++	/* Clear any pending interrupts someone might have left around for us */
++	VDU_WRITE(priv, ISR, INTR_MASK);
++}
++
++void baikal_vdu_irq_enable(struct drm_device *dev)
++{
++  struct baikal_vdu_private *priv = dev->dev_private;
++  u32 irq_mask;
++
++	/* Enable the render done interrupts */
++  irq_mask = VDU_READ(priv, IMR);
++  irq_mask |= INTR_FER;
++  VDU_WRITE(priv, IMR, irq_mask);
++}
++
++void baikal_vdu_irq_disable(struct drm_device *dev)
++{
++  struct baikal_vdu_private *priv = dev->dev_private;
++
++	/* Disable sending interrupts for our driver's IRQs. */
++  VDU_WRITE(priv, IMR, 0);
++	/* Clear any pending interrupts we might have left. */
++	VDU_WRITE(priv, ISR, INTR_MASK);
++
++	/* Finish any interrupt handler still in flight. */
++	disable_irq(priv->irq);
++}
++
++int baikal_vdu_irq_install(struct drm_device *dev, int irq)
++{
++  int ret;
++
++	if (irq == IRQ_NOTCONNECTED)
++		return -ENOTCONN;
++
++	baikal_vdu_irq_prepare(dev);
++
++	ret = request_irq(irq, baikal_vdu_irq, 0, dev->driver->name, dev);
++	if (ret)
++		return ret;
++
++	baikal_vdu_irq_enable(dev);
++
++	return 0;
++}
++
++void baikal_vdu_irq_uninstall(struct drm_device *dev)
++{
++  struct baikal_vdu_private *priv = dev->dev_private;
++
++	baikal_vdu_irq_disable(dev);
++	free_irq(priv->irq, dev);
++}
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_plane.c b/drivers/gpu/drm/baikal/baikal_vdu_plane.c
+new file mode 100644
+index 00000000000..bf8ee33b74e
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_plane.c
+@@ -0,0 +1,194 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * Copyright (c) 2006-2008 Intel Corporation
++ * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
++ * Copyright (C) 2011 Texas Instruments
++ * (C) COPYRIGHT 2012-2013 ARM Limited. All rights reserved.
++ */
++
++#include <linux/arm-smccc.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/of_graph.h>
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_fb_cma_helper.h>
++#include <drm/drm_fourcc.h>
++#include <drm/drm_gem_cma_helper.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_plane_helper.h>
++#include <drm/drm_gem_atomic_helper.h>
++
++#include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
++
++#define BAIKAL_SMC_VDU_UPDATE	0x82000100
++
++void baikal_vdu_update_work(struct work_struct *work)
++{
++	struct arm_smccc_res res;
++	unsigned long flags;
++	struct baikal_vdu_private *priv = container_of(work, struct baikal_vdu_private,
++			update_work.work);
++	int count = 0;
++	u64 t1, t2;
++	t1 = read_sysreg(CNTVCT_EL0);
++	spin_lock_irqsave(&priv->lock, flags);
++	arm_smccc_smc(BAIKAL_SMC_VDU_UPDATE, priv->fb_addr, priv->fb_end, 0, 0, 0, 0, 0, &res);
++	spin_unlock_irqrestore(&priv->lock, flags);
++	if (res.a0 == -EBUSY)
++		priv->counters[15]++;
++	else
++		priv->counters[16]++;
++	while (res.a0 == -EBUSY && count < 10) {
++		count++;
++		usleep_range(10000, 20000);
++		res.a0 = 0;
++		spin_lock_irqsave(&priv->lock, flags);
++		arm_smccc_smc(BAIKAL_SMC_VDU_UPDATE, priv->fb_addr, priv->fb_end, 0, 0, 0, 0, 0, &res);
++		spin_unlock_irqrestore(&priv->lock, flags);
++		if (res.a0 == -EBUSY)
++			priv->counters[15]++;
++		else
++			priv->counters[16]++;
++	}
++	t2 = read_sysreg(CNTVCT_EL0);
++	priv->counters[17] = t2 - t1;
++	priv->counters[18] = count;
++	priv->counters[19]++;
++}
++
++static void baikal_vdu_primary_plane_atomic_update(struct drm_plane *plane,
++					      struct drm_atomic_state *old_state)
++{
++	struct drm_device *dev = plane->dev;
++	struct baikal_vdu_private *priv = dev->dev_private;
++	struct drm_plane_state *state = plane->state;
++	struct drm_framebuffer *fb = state->fb;
++	struct arm_smccc_res res;
++	uint32_t cntl;
++	uint32_t addr;
++	uint32_t end;
++	unsigned long flags;
++
++	if (!fb)
++		return;
++
++	addr = drm_fb_cma_get_gem_addr(fb, state, 0);
++	end = ((addr + fb->height * fb->pitches[0] - 1) & MRR_DEAR_MRR_MASK) | MRR_OUTSTND_RQ(4);
++	if (priv->panel)
++		addr |= 1;
++
++	spin_lock_irqsave(&priv->lock, flags);
++	arm_smccc_smc(BAIKAL_SMC_VDU_UPDATE, addr, end, 0, 0, 0, 0, 0, &res);
++	spin_unlock_irqrestore(&priv->lock, flags);
++
++	if (res.a0 == -EBUSY) {
++		priv->counters[15]++;
++		priv->fb_addr = addr;
++		priv->fb_end = end;
++		smp_wmb();
++		schedule_delayed_work(&priv->update_work, usecs_to_jiffies(250));
++	} else
++		priv->counters[16]++;
++
++	cntl = VDU_READ(priv, CR1);
++	cntl &= ~CR1_BPP_MASK;
++
++	/* Note that the the hardware's format reader takes 'r' from
++	 * the low bit, while DRM formats list channels from high bit
++	 * to low bit as you read left to right.
++	 */
++	switch (fb->format->format) {
++	case DRM_FORMAT_BGR888:
++		cntl |= CR1_BPP24 | CR1_FBP | CR1_BGR;
++		break;
++	case DRM_FORMAT_RGB888:
++		cntl |= CR1_BPP24 | CR1_FBP;
++		break;
++	case DRM_FORMAT_ABGR8888:
++	case DRM_FORMAT_XBGR8888:
++		cntl |= CR1_BPP24 | CR1_BGR;
++		break;
++	case DRM_FORMAT_ARGB8888:
++	case DRM_FORMAT_XRGB8888:
++		cntl |= CR1_BPP24;
++		break;
++	case DRM_FORMAT_BGR565:
++		cntl |= CR1_BPP16_565 | CR1_BGR;
++		break;
++	case DRM_FORMAT_RGB565:
++		cntl |= CR1_BPP16_565;
++		break;
++	case DRM_FORMAT_ABGR1555:
++	case DRM_FORMAT_XBGR1555:
++		cntl |= CR1_BPP16_555 | CR1_BGR;
++		break;
++	case DRM_FORMAT_ARGB1555:
++	case DRM_FORMAT_XRGB1555:
++		cntl |= CR1_BPP16_555;
++		break;
++	default:
++		WARN_ONCE(true, "Unknown FB format 0x%08x, set XRGB8888 instead\n",
++				fb->format->format);
++		cntl |= CR1_BPP24;
++		break;
++	}
++
++	VDU_WRITE(priv, CR1, cntl);
++}
++
++static const struct drm_plane_helper_funcs baikal_vdu_primary_plane_helper_funcs = {
++	.atomic_update = baikal_vdu_primary_plane_atomic_update,
++	.prepare_fb = drm_gem_plane_helper_prepare_fb,
++};
++
++static const struct drm_plane_funcs baikal_vdu_primary_plane_funcs = {
++	.update_plane = drm_atomic_helper_update_plane,
++	.disable_plane = drm_atomic_helper_disable_plane,
++	.reset = drm_atomic_helper_plane_reset,
++	.destroy = drm_plane_cleanup,
++	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
++};
++
++int baikal_vdu_primary_plane_init(struct drm_device *drm)
++{
++	struct baikal_vdu_private *priv = drm->dev_private;
++	struct drm_plane *plane = &priv->primary;
++	static const u32 formats[] = {
++		DRM_FORMAT_BGR888,
++		DRM_FORMAT_RGB888,
++		DRM_FORMAT_ABGR8888,
++		DRM_FORMAT_XBGR8888,
++		DRM_FORMAT_ARGB8888,
++		DRM_FORMAT_XRGB8888,
++		DRM_FORMAT_BGR565,
++		DRM_FORMAT_RGB565,
++		DRM_FORMAT_ABGR1555,
++		DRM_FORMAT_XBGR1555,
++		DRM_FORMAT_ARGB1555,
++		DRM_FORMAT_XRGB1555,
++	};
++	int ret;
++
++	ret = drm_universal_plane_init(drm, plane, 0,
++				       &baikal_vdu_primary_plane_funcs,
++				       formats,
++				       ARRAY_SIZE(formats),
++				       NULL,
++				       DRM_PLANE_TYPE_PRIMARY,
++				       NULL);
++	if (ret)
++		return ret;
++
++	drm_plane_helper_add(plane, &baikal_vdu_primary_plane_helper_funcs);
++
++	return 0;
++}
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_regs.h b/drivers/gpu/drm/baikal/baikal_vdu_regs.h
+new file mode 100644
+index 00000000000..9ed7601712f
+--- /dev/null
++++ b/drivers/gpu/drm/baikal/baikal_vdu_regs.h
+@@ -0,0 +1,175 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Copyright (C) 2019-2021 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ *   David A Rusling
++ *   Copyright (C) 2001 ARM Limited
++ */
++
++#ifndef __BAIKAL_VDU_REGS_H__
++#define __BAIKAL_VDU_REGS_H__
++
++/* Baikal VDU Register addresses */
++#define CR1         0x000 /* Control Register 1 */
++#define HTR         0x008 /* Horizontal Timing Register */
++#define VTR1        0x00C /* Vertical Timing Register 1 */
++#define VTR2        0x010 /* Vertical Timing Register 2 */
++#define PCTR        0x014 /* Pixel Clock Timing Register */
++#define ISR         0x018 /* Interrupt Status Register */
++#define IMR         0x01C /* Interrupt Mask Register */
++#define IVR         0x020 /* Interrupt Vector Register */
++#define ISCR        0x024 /* Interrupt Scan Compare Register */
++#define DBAR        0x028 /* DMA Base Address Register */
++#define DCAR        0x02C /* DMA Current Address Register */
++#define DEAR        0x030 /* DMA End Address Register */
++#define PWMFR       0x034 /* PWM Frequency Register */
++#define PWMDCR      0x038 /* PWM Duty Cycle Register */
++#define HVTER       0x044 /* Horizontal and Vertical Timing Extension Register */
++#define HPPLOR      0x048 /* Horizontal Timing PLL Override Register */
++#define GPIOR       0x1F8 /* GPIO Register */
++#define OWER        0x600 /* Overlay Window Enable Register */
++#define OWXSER0     0x604 /* Overlay Window X Start / End Register 0 */
++#define OWYSER0     0x608 /* Overlay Window Y Start / End Register 0 */
++#define OWDBAR0     0x60C /* Overlay Window DMA Base Address Register 0 */
++#define OWDCAR0     0x610 /* Overlay Window DMA Current Address Register 0 */
++#define OWDEAR0     0x614 /* Overlay Window DMA End Address Register 0 */
++#define OWXSER1     0x618 /* Overlay Window X Start / End Register 1 */
++#define OWYSER1     0x61C /* Overlay Window Y Start / End Register 1 */
++#define OWDBAR1     0x620 /* Overlay Window DMA Base Address Register 1 */
++#define OWDCAR1     0x624 /* Overlay Window DMA Current Address Register 1 */
++#define OWDEAR1     0x628 /* Overlay Window DMA End Address Register 1 */
++#define MRR         0xFFC /* Multiple Memory Read Request Register */
++
++/* Control Register 1 fields */
++#define CR1_FBP             BIT(19)         /* Frame buffer 24 bpp Packed Word */
++#define CR1_FDW_MASK        GENMASK(17, 16) /* FIFO DMA Request Words */
++#define CR1_FDW_4_WORDS     (0 << 16)       /* 4 beat burst txn when FIFO has room for 4 or more words */
++#define CR1_FDW_8_WORDS     (1 << 16)       /* 8 beat burst txn when FIFO has room for 8 or more words */
++#define CR1_FDW_16_WORDS    (2 << 16)       /* 16 beat burst txn when FIFO has room for 16 or more words */
++#define CR1_PSS                             /* Parallel Load Source Select */
++#define CR1_OPS_MASK        GENMASK(14, 12) /* Output Pixel Select */
++#define CR1_OPS_LCD18       (0 << 13)       /* Output Color Depth is 18 (LVDS only) */
++#define CR1_OPS_LCD24       (1 << 13)       /* Output Color Depth is 24 (valid for LVDS and HDMI) */
++#define CR1_OPS_565         (0 << 12)       /* 16 bpp Output Format RGB565 */
++#define CR1_OPS_555         (1 << 12)       /* 16 bpp Output Format RGB555 */
++#define CR1_VSP             BIT(11)         /* Vertical Sync Polarity */
++#define CR1_HSP             BIT(10)         /* Horizontal Sync Polarity */
++#define CR1_DEP             BIT(8)          /* Data Enable Polarity */
++#define CR1_BGR             BIT(5)          /* RGB or BGR Format Select */
++#define CR1_BPP_MASK        GENMASK(4, 2)   /* LCD Bits Per Pixel */
++#define CR1_BPP1            (0 << 2)
++#define CR1_BPP2            (1 << 2)
++#define CR1_BPP4            (2 << 2)
++#define CR1_BPP8            (3 << 2)
++#define CR1_BPP16           (4 << 2)
++#define CR1_BPP18           (5 << 2)
++#define CR1_BPP24           (6 << 2)
++#define CR1_LCE             BIT(0)          /* VDU Controller Enable */
++
++#define CR1_BPP16_555 ((CR1_BPP16) | (CR1_OPS_555))
++#define CR1_BPP16_565 ((CR1_BPP16) | (CR1_OPS_565))
++
++/* Horizontal Timing Register fields */
++#define HTR_HSW_MASK        GENMASK(31, 24) /* Horizontal Sync Width mask */
++#define HTR_HSW(x)          ((x) << 24)     /* Horizontal Sync Width value */
++#define HTR_HSW_LSB_WIDTH   8
++#define HTR_HBP_MASK        GENMASK(23, 16) /* Horizontal Back Porch mask */
++#define HTR_HBP(x)          ((x) << 16)     /* Horizontal Back Porch value */
++#define HTR_HBP_LSB_WIDTH   8
++#define HTR_PPL_MASK        GENMASK(15, 8)  /* Pixels Per Line mask */
++#define HTR_PPL(x)          ((x) << 8)      /* Pixels Per Line value */
++#define HTR_HFP_MASK        GENMASK(7, 0)   /* Horizontal Front Porch mask */
++#define HTR_HFP(x)          ((x) << 0)      /* Horizontal Front Porch value */
++#define HTR_HFP_LSB_WIDTH   8
++
++/* Vertical Timing Register 1 fields */
++#define VTR1_VBP_MASK       GENMASK(23, 16) /* Vertical Back Porch mask */
++#define VTR1_VBP(x)         ((x) << 16)     /* Vertical Back Porch value */
++#define VTR1_VBP_LSB_WIDTH  8
++#define VTR1_VFP_MASK       GENMASK(15, 8)  /* Vertical Front Porch mask */
++#define VTR1_VFP(x)         ((x) << 8)      /* Vertical Front Porch value */
++#define VTR1_VFP_LSB_WIDTH  8
++#define VTR1_VSW_MASK       GENMASK(7, 0)   /* Vertical Sync Width mask */
++#define VTR1_VSW(x)         ((x) << 0)      /* Vertical Sync Width value */
++#define VTR1_VSW_LSB_WIDTH  8
++
++/* Vertical Timing Register 2 fields */
++#define VTR2_LPP_MASK       GENMASK(11, 0)  /* Lines Per Panel mask */
++
++/* Pixel Clock Timing Register fields */
++#define PCTR_PCI2           BIT(11)         /* ??? */
++#define PCTR_PCR            BIT(10)         /* Pixel Clock Domain Reset */
++#define PCTR_PCI            BIT(9)          /* Pixel Clock Input Select */
++#define PCTR_PCB            BIT(8)          /* ??? */
++#define PCTR_PCD_MASK       GENMASK(7, 0)   /* ??? */
++#define PCTR_MAX_PCD        128
++
++/* Interrupt Status (ISR), Mask (IMR) and Vector (IVR) Registers fields */
++#define INTR_MASK                                             \
++  GENMASK(17, 16) | GENMASK(11, 0) /* All Interrupts mask */
++#define INTR_UFO    BIT(17)        /* UHD FIFO Overrun error */
++#define INTR_UFU    BIT(16)        /* UHD FIFO Underrun error */
++#define INTR_ARS    BIT(11)        /* AXI Master Response Signal error */
++#define INTR_ARI    BIT(10)        /* AXI Master Return ID error */
++#define INTR_ABL    BIT(9)         /* AXI Master Read Burst Length error */
++#define INTR_VDD    BIT(8)         /* VDU Controller Disable Done */
++#define INTR_BAU    BIT(7)         /* DMA Base Address Register Update to
++                                      DMA Current Address Register (DCAR) */
++#define INTR_VCT    BIT(6)         /* Vertical Scan Compare Triggered event */
++#define INTR_MBE    BIT(5)         /* AXI Master Bus Error */
++#define INTR_FER    BIT(4)         /* Input or Output FIFO error */
++#define INTR_IFO    BIT(3)         /* Input FIFO Overrun error */
++#define INTR_IFU    BIT(2)         /* Input FIFO Underrun error */
++#define INTR_OFO    BIT(1)         /* Output FIFO Overrun error */
++#define INTR_OFU    BIT(0)         /* Output FIFO Underrun error */
++
++/* Interrupt Scan Compare Register fields */
++#define ISCR_VSC_OFF        0x0 /* Vertical Scan Compare inactive */
++#define ISCR_VSC_VSW        0x4 /* Start of Vertical Sync Width (VSW) pulse */
++#define ISCR_VSC_VBP        0x5 /* Start of Vertical Back Porch (VBP) */
++#define ISCR_VSC_VACTIVE    0x6 /* Start of Active Frame Window */
++#define ISCR_VSC_VFP        0x7 /* Start of Vertical Front Porch (VFP) */
++
++/* PWM Frequency Register fields */
++#define PWMFR_PWMPCR        BIT(24)        /* PWM Clock Domain Reset */
++#define PWMFR_PWMFCI        BIT(23)        /* PWM Frequency Clock Input Select */
++#define PWMFR_PWMFCE        BIT(22)        /* PWM Frequency Clock Enable */
++#define PWMFR_PWMFCD_MASK   GENMASK(21, 0) /* PWM Frequency Clock Divider mask */
++#define PWMFR_PWMFCD(x)     ((x) << 0)     /* PWM Frequency Clock Divider value */
++
++/* Horizontal and Vertical Timing Extension Register fields */
++#define HVTER_VSWE_MASK     GENMASK(25, 24) /* Vertical Sync Width Extension mask */
++#define HVTER_VSWE(x)       ((x) << 24)     /* Vertical Sync Width Extension value */
++#define HVTER_HSWE_MASK     GENMASK(17, 16) /* Horizontal Sync Width Extension mask */
++#define HVTER_HSWE(x)       ((x) << 16)     /* Horizontal Sync Width Extension value */
++#define HVTER_VBPE_MASK     GENMASK(13, 12) /* Vertical Back Porch Extension mask */
++#define HVTER_VBPE(x)       ((x) << 12)     /* Vertical Back Porch Extension value */
++#define HVTER_VFPE_MASK     GENMASK(9, 8)   /* Vertical Front Porch Extension mask */
++#define HVTER_VFPE(x)       ((x) << 8)      /* Vertical Front Porch Extension value */
++#define HVTER_HBPE_MASK     GENMASK(5, 4)   /* Horizontal Back Porch Extension mask */
++#define HVTER_HBPE(x)       ((x) << 4)      /* Horizontal Back Porch Extension value */
++#define HVTER_HFPE_MASK     GENMASK(1, 0)   /* Horizontal Front Porch Extension mask */
++#define HVTER_HFPE(x)       ((x) << 0)      /* Horizontal Front Porch Extension value */
++
++/* Horizontal Timing PLL Override Register fields */
++#define HPPLOR_HPOE         BIT(31)         /* Horizontal Pixel Per Line Override Enable */
++#define HPPLOR_HPPLO_MASK   GENMASK(11, 0)  /* Horizontal Pixel Per Line Override mask */
++#define HPPLOR_HPPLO(x)     ((x) << 0)      /* Horizontal Pixel Per Line Override value */
++
++/* GPIO Register fields */
++#define GPIOR_UHD_MASK      GENMASK(23, 16) /* UHD Formatter Controls */
++#define GPIOR_UHD_SNGL_PORT (0 << 18)       /* 1 Port, ipixelclkx7_lvds = ipixelclk */
++#define GPIOR_UHD_DUAL_PORT (1 << 18)       /* 2 Ports, ipixelclkx7_lvds = ipixelclk / 2 */
++#define GPIOR_UHD_QUAD_PORT (2 << 18)       /* 4 Ports, ipixelclkx7_lvds = ipixelclk / 4 */
++#define GPIOR_UHD_ENB       BIT(17)         /* UHD Formatter Enable */
++
++/* Multiple Memory Read Request Register fields */
++#define MRR_DEAR_MRR_MASK   GENMASK(31, 3)  /* DMA End Address mask */
++#define MRR_OUTSTND_RQ_MASK GENMASK(2, 0)   /* ??? */
++#define MRR_OUTSTND_RQ(x)   ((x >> 1) << 0) /* ??? */
++
++#endif /* __BAIKAL_VDU_REGS_H__ */
+diff --git a/drivers/gpu/drm/bridge/Kconfig b/drivers/gpu/drm/bridge/Kconfig
+index 431b6e12a81..6f5509b5a99 100644
+--- a/drivers/gpu/drm/bridge/Kconfig
++++ b/drivers/gpu/drm/bridge/Kconfig
+@@ -315,6 +315,13 @@ config DRM_TI_TPD12S015
+ 	  Texas Instruments TPD12S015 HDMI level shifter and ESD protection
+ 	  driver.
+ 
++config DRM_STDP4028
++	tristate "MegaChips STDP4028 DP bridge"
++	depends on OF
++	select DRM_KMS_HELPER
++	help
++	  MegaChips STDP4028 DP bridge driver
++
+ source "drivers/gpu/drm/bridge/analogix/Kconfig"
+ 
+ source "drivers/gpu/drm/bridge/adv7511/Kconfig"
+diff --git a/drivers/gpu/drm/bridge/Makefile b/drivers/gpu/drm/bridge/Makefile
+index f2c73683cfc..9faf98509d2 100644
+--- a/drivers/gpu/drm/bridge/Makefile
++++ b/drivers/gpu/drm/bridge/Makefile
+@@ -29,6 +29,7 @@ obj-$(CONFIG_DRM_TI_TFP410) += ti-tfp410.o
+ obj-$(CONFIG_DRM_TI_TPD12S015) += ti-tpd12s015.o
+ obj-$(CONFIG_DRM_NWL_MIPI_DSI) += nwl-dsi.o
+ obj-$(CONFIG_DRM_ITE_IT66121) += ite-it66121.o
++obj-$(CONFIG_DRM_STDP4028) += stdp4028.o
+ 
+ obj-y += analogix/
+ obj-y += cadence/
+diff --git a/drivers/gpu/drm/bridge/stdp4028.c b/drivers/gpu/drm/bridge/stdp4028.c
+new file mode 100644
+index 00000000000..7e1fe46b64a
+--- /dev/null
++++ b/drivers/gpu/drm/bridge/stdp4028.c
+@@ -0,0 +1,477 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Driver for MegaChips STDP4028 LVDS to DP display bridge
++ */
++
++#include <linux/gpio.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_gpio.h>
++#include <linux/delay.h>
++#include <drm/drm_atomic.h>
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_crtc_helper.h>
++#include <drm/drm_probe_helper.h>
++#include <drm/drm_edid.h>
++#include <drm/drm_print.h>
++#include <drm/drm_bridge.h>
++
++/* video modes */
++#include <video/display_timing.h>
++#include <video/of_display_timing.h>
++#include <video/videomode.h>
++
++#define MAX_PIXEL_CLOCK 330000
++
++#define EDID_EXT_BLOCK_CNT 0x7E
++
++#define STDP4028_PRODUCT_ID_REG 0x00
++#define STDP4028_IRQ_OUT_CONF_REG 0x02
++#define STDP4028_IRQ_STS_REG 0x03
++#define STDP4028_I2C_CTRL_REG 0x08
++#define STDP4028_LVDS_FMT_REG 0x0B
++#define STDP4028_LVDS_CTRL0_REG 0x0C
++#define STDP4028_DPTX_IRQ_EN_REG 0x3C
++#define STDP4028_DPTX_IRQ_STS_REG 0x3D
++#define STDP4028_DPTX_STS_REG 0x3E
++
++#define STDP4028_DPTX_DP_IRQ_EN 0x10
++
++#define STDP4028_DPTX_HOTPLUG_IRQ_EN 0x04
++#define STDP4028_DPTX_LINK_CH_IRQ_EN 0x20
++#define STDP4028_DPTX_IRQ_CONFIG \
++	(STDP4028_DPTX_LINK_CH_IRQ_EN | STDP4028_DPTX_HOTPLUG_IRQ_EN)
++
++#define STDP4028_DPTX_HOTPLUG_STS 0x02
++#define STDP4028_DPTX_LINK_STS 0x10
++#define STDP4028_CON_STATE_CONNECTED \
++	(STDP4028_DPTX_HOTPLUG_STS | STDP4028_DPTX_LINK_STS)
++
++#define STDP4028_DPTX_HOTPLUG_CH_STS 0x04
++#define STDP4028_DPTX_LINK_CH_STS 0x20
++#define STDP4028_DPTX_IRQ_CLEAR \
++	(STDP4028_DPTX_LINK_CH_STS | STDP4028_DPTX_HOTPLUG_CH_STS)
++
++struct stdp4028 {
++	struct drm_connector connector;
++	struct drm_bridge bridge;
++	struct i2c_client *stdp4028_i2c;
++	struct i2c_client *edid_i2c;
++	struct edid *edid;
++	struct gpio_desc *reset_gpio;
++	struct mutex lock;
++	int channels;
++	int chan_cfg;
++};
++
++static inline int stdp_read(struct stdp4028 *stdp, int reg)
++{
++	int ret;
++
++	ret = i2c_smbus_read_word_data(stdp->stdp4028_i2c, reg);
++	if (ret < 0)
++		return ret;
++	return be16_to_cpu(ret);
++}
++
++static inline int stdp_write(struct stdp4028 *stdp, int reg, u16 val)
++{
++	val = cpu_to_be16(val);
++	return i2c_smbus_write_word_data(stdp->stdp4028_i2c, reg, val);
++}
++
++#define bridge_to_stdp4028(bridge) \
++	container_of(bridge, struct stdp4028, bridge)
++
++#define connector_to_stdp4028(connector) \
++	container_of(connector, struct stdp4028, connector)
++
++u8 *stdp4028_get_edid(struct i2c_client *client)
++{
++	struct i2c_adapter *adapter = client->adapter;
++	unsigned char start = 0x00;
++	unsigned int total_size;
++	u8 *block = kmalloc(EDID_LENGTH, GFP_KERNEL);
++
++	struct i2c_msg msgs[] = {
++		{
++			.addr   = client->addr,
++			.flags  = 0,
++			.len    = 1,
++			.buf    = &start,
++		}, {
++			.addr   = client->addr,
++			.flags  = I2C_M_RD,
++			.len    = EDID_LENGTH,
++			.buf    = block,
++		}
++	};
++
++	if (!block)
++		return NULL;
++
++	if (i2c_transfer(adapter, msgs, 2) != 2) {
++		DRM_ERROR("Unable to read EDID.\n");
++		goto err;
++	}
++
++	if (!drm_edid_block_valid(block, 0, false, NULL)) {
++		DRM_ERROR("Invalid EDID block\n");
++		goto err;
++	}
++
++	total_size = (block[EDID_EXT_BLOCK_CNT] + 1) * EDID_LENGTH;
++	if (total_size > EDID_LENGTH) {
++		kfree(block);
++		block = kmalloc(total_size, GFP_KERNEL);
++		if (!block)
++			return NULL;
++
++		/* Yes, read the entire buffer, and do not skip the first
++		 * EDID_LENGTH bytes.
++		 */
++		start = 0x00;
++		msgs[1].len = total_size;
++		msgs[1].buf = block;
++
++		if (i2c_transfer(adapter, msgs, 2) != 2) {
++			DRM_ERROR("Unable to read EDID extension blocks.\n");
++			goto err;
++		}
++	}
++
++	return block;
++
++err:
++	kfree(block);
++	return NULL;
++}
++
++/*
++ * Get videomode specified in the devicetree.
++ * Return 1 on success, 0 otherwise.
++ */
++static int stdp4028_get_of_modes(struct drm_connector *connector)
++{
++	struct stdp4028 *stdp = connector_to_stdp4028(connector);
++	struct i2c_client *client = stdp->stdp4028_i2c;
++	struct drm_display_mode *mode;
++	struct device_node *np = client->dev.of_node;
++	struct display_timing timing;
++	struct videomode video_mode;
++	int ret;
++
++	ret = of_get_display_timing(np, "panel-timing", &timing);
++	if (ret < 0)
++		return 0;
++
++	videomode_from_timing(&timing, &video_mode);
++
++	mode = drm_mode_create(connector->dev);
++	if (!mode)
++		return 0;
++	drm_display_mode_from_videomode(&video_mode, mode);
++	mode->type |= DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
++
++	drm_mode_probed_add(connector, mode);
++	return 1;
++}
++
++static int stdp4028_get_modes(struct drm_connector *connector)
++{
++	struct stdp4028 *stdp;
++	struct i2c_client *client;
++	int num_modes = 0;
++
++	stdp = connector_to_stdp4028(connector);
++	client = stdp->edid_i2c;
++
++	mutex_lock(&stdp->lock);
++
++	num_modes = stdp4028_get_of_modes(connector);
++	if (num_modes > 0) {
++		mutex_unlock(&stdp->lock);
++		return num_modes;
++	}
++
++	kfree(stdp->edid);
++	stdp->edid = (struct edid *) stdp4028_get_edid(client);
++
++	if (stdp->edid) {
++		drm_connector_update_edid_property(connector, stdp->edid);
++		num_modes = drm_add_edid_modes(connector, stdp->edid);
++	}
++
++	mutex_unlock(&stdp->lock);
++
++	return num_modes;
++}
++
++
++static enum drm_mode_status stdp4028_mode_valid(
++		 struct drm_connector *connector, struct drm_display_mode *mode)
++{
++	if (mode->clock > MAX_PIXEL_CLOCK) {
++		DRM_INFO("The pixel clock for the mode %s is too high, and not supported.",
++			 mode->name);
++		return MODE_CLOCK_HIGH;
++	}
++
++	return MODE_OK;
++}
++
++static const struct
++drm_connector_helper_funcs stdp4028_connector_helper_funcs = {
++	.get_modes = stdp4028_get_modes,
++	.mode_valid = stdp4028_mode_valid,
++};
++
++static enum drm_connector_status stdp4028_detect(
++		 struct drm_connector *connector, bool force)
++{
++	struct stdp4028 *stdp = connector_to_stdp4028(connector);
++	s32 link_state;
++
++	link_state = stdp_read(stdp, STDP4028_DPTX_STS_REG);
++
++	if (link_state == STDP4028_CON_STATE_CONNECTED)
++		return connector_status_connected;
++
++	if (link_state == 0)
++		return connector_status_disconnected;
++
++	return connector_status_unknown;
++}
++
++static const struct drm_connector_funcs stdp4028_connector_funcs = {
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.detect = stdp4028_detect,
++	.destroy = drm_connector_cleanup,
++	.reset = drm_atomic_helper_connector_reset,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++};
++
++static irqreturn_t stdp4028_irq_handler(int irq, void *dev_id)
++{
++	struct stdp4028 *stdp = dev_id;
++
++	mutex_lock(&stdp->lock);
++
++	stdp_write(stdp, STDP4028_DPTX_IRQ_STS_REG, STDP4028_DPTX_IRQ_CLEAR);
++
++	mutex_unlock(&stdp->lock);
++
++	if (stdp->connector.dev)
++		drm_kms_helper_hotplug_event(stdp->connector.dev);
++
++	return IRQ_HANDLED;
++}
++
++static int stdp4028_attach(struct drm_bridge *bridge, enum drm_bridge_attach_flags flags)
++{
++	struct stdp4028 *stdp = bridge_to_stdp4028(bridge);
++	struct drm_connector *connector = &stdp->connector;
++	int ret;
++
++	if (!bridge->encoder) {
++		DRM_ERROR("Parent encoder object not found");
++		return -ENODEV;
++	}
++
++	if (stdp->stdp4028_i2c->irq)
++		connector->polled = DRM_CONNECTOR_POLL_HPD;
++	else
++		connector->polled = DRM_CONNECTOR_POLL_CONNECT |
++				    DRM_CONNECTOR_POLL_DISCONNECT;
++
++	drm_connector_helper_add(connector, &stdp4028_connector_helper_funcs);
++
++	ret = drm_connector_init(bridge->dev, connector,
++				 &stdp4028_connector_funcs,
++				 DRM_MODE_CONNECTOR_DisplayPort);
++	if (ret) {
++		DRM_ERROR("Failed to initialize connector with drm\n");
++		return ret;
++	}
++
++	ret = drm_connector_attach_encoder(connector, bridge->encoder);
++	if (ret)
++		return ret;
++
++	/* Configures the bridge to re-enable interrupts after each ack. */
++	stdp_write(stdp, STDP4028_IRQ_OUT_CONF_REG, STDP4028_DPTX_DP_IRQ_EN);
++
++	/* Enable interrupts */
++	stdp_write(stdp, STDP4028_DPTX_IRQ_EN_REG, STDP4028_DPTX_IRQ_CONFIG);
++
++	return 0;
++}
++
++static const struct drm_bridge_funcs stdp4028_funcs = {
++	.attach = stdp4028_attach,
++};
++
++static int stdp4028_probe(struct i2c_client *stdp4028_i2c,
++			  const struct i2c_device_id *id)
++{
++	struct device *dev = &stdp4028_i2c->dev;
++	struct stdp4028 *bridge;
++	int ret;
++	u32 edid_i2c_reg, channels, chan_cfg;
++	enum of_gpio_flags flags;
++	int reset_gpio, i;
++	int reg;
++
++	bridge = devm_kzalloc(dev, sizeof(*bridge), GFP_KERNEL);
++	if (!bridge)
++		return -ENOMEM;
++
++	mutex_init(&bridge->lock);
++
++	bridge->stdp4028_i2c = stdp4028_i2c;
++	bridge->bridge.driver_private = bridge;
++	i2c_set_clientdata(stdp4028_i2c, bridge);
++
++	reset_gpio = of_get_named_gpio_flags(dev->of_node,
++					     "reset-gpios", 0, &flags);
++	if (gpio_is_valid(reset_gpio)) {
++		unsigned long gpio_flags;
++
++		/*
++		 * We will set GPIO to "inactive" state instead of toggling
++		 * reset. If the chip is not ready we will return -EPROBE_DEFER
++		 * and retry later.
++		 */
++		if (!(flags & OF_GPIO_ACTIVE_LOW))
++			gpio_flags = GPIOF_ACTIVE_LOW | GPIOF_OUT_INIT_LOW;
++		else
++			gpio_flags = GPIOF_OUT_INIT_HIGH;
++		ret = devm_gpio_request_one(dev, reset_gpio, gpio_flags,
++					    "stdp-reset");
++		if (ret) {
++			dev_err(dev, "request GPIO failed (%d)\n", ret);
++			/* continue anyway */
++		} else {
++			bridge->reset_gpio = gpio_to_desc(reset_gpio);
++			udelay(100);
++		}
++	} else if (reset_gpio == -EPROBE_DEFER) {
++		return -EPROBE_DEFER;
++	}
++
++	ret = of_property_read_u32(dev->of_node, "channels", &channels);
++	if (ret)
++		channels = 1;
++	bridge->channels = channels;
++
++	ret = of_property_read_u32(dev->of_node, "chan-cfg", &chan_cfg);
++	if (ret)
++		chan_cfg = 0;
++	bridge->chan_cfg = chan_cfg;
++
++	ret = of_property_read_u32(dev->of_node, "edid-reg", &edid_i2c_reg);
++	if (ret) {
++		dev_warn(dev, "edid-reg not specified, assuming 0x50...\n");
++		edid_i2c_reg = 0x50;
++	}
++
++	/* Configure stdp registers */
++	reg = stdp_read(bridge, STDP4028_PRODUCT_ID_REG);
++	if (reg < 0) {
++		dev_err(dev, "Can't read stdp id (%d)\n", reg);
++		return -EPROBE_DEFER; /* probably, reset not complete */
++	}
++
++	dev_info(dev, "stdp id word: %x\n", reg);
++
++	for (i = 0; i < 10; i++) {
++		reg = stdp_read(bridge, STDP4028_IRQ_STS_REG);
++		if (reg > 0 && reg & 0x800)
++			break;
++		usleep_range(1000, 1500);
++	}
++	dev_dbg(dev, "STDP status word %x (i = %d)\n", reg, i);
++	stdp_write(bridge, STDP4028_IRQ_STS_REG, 0x800); //clear
++	/* enable edid addr */
++	stdp_write(bridge, STDP4028_I2C_CTRL_REG, (edid_i2c_reg << 1) | 0x400);
++
++	if (channels == 4)
++		reg = 2;
++	else if (channels == 2)
++		reg = 1;
++	else
++		reg = 0;
++	reg |= chan_cfg << 2;
++	stdp_write(bridge, STDP4028_LVDS_CTRL0_REG, reg);
++
++	bridge->edid_i2c = i2c_new_dummy_device(stdp4028_i2c->adapter, edid_i2c_reg);
++
++	if (!bridge->edid_i2c)
++		return -ENOMEM;
++
++	bridge->bridge.funcs = &stdp4028_funcs;
++	bridge->bridge.of_node = dev->of_node;
++	drm_bridge_add(&bridge->bridge);
++
++	/* Clear pending interrupts since power up. */
++	stdp_write(bridge, STDP4028_DPTX_IRQ_STS_REG, STDP4028_DPTX_IRQ_CLEAR);
++
++	if (stdp4028_i2c->irq) {
++		ret = devm_request_threaded_irq(&stdp4028_i2c->dev,
++					stdp4028_i2c->irq, NULL,
++					stdp4028_irq_handler,
++					IRQF_TRIGGER_HIGH | IRQF_ONESHOT,
++					"stdp-lvds-dp", bridge);
++		if (ret)
++			return ret;
++
++		/* enable DPTX IRQs */
++		stdp_write(bridge, STDP4028_IRQ_OUT_CONF_REG,
++			   STDP4028_DPTX_DP_IRQ_EN);
++		stdp_write(bridge, STDP4028_DPTX_IRQ_EN_REG,
++			   STDP4028_DPTX_IRQ_CONFIG);
++	}
++
++	return 0;
++}
++
++static int stdp4028_remove(struct i2c_client *stdp4028_i2c)
++{
++	struct stdp4028 *stdp =	i2c_get_clientdata(stdp4028_i2c);
++
++	drm_bridge_remove(&stdp->bridge);
++	i2c_unregister_device(stdp->edid_i2c);
++
++	kfree(stdp->edid);
++
++	return 0;
++}
++
++static const struct i2c_device_id stdp4028_i2c_table[] = {
++	{"stdp4028-lvds-dp", 0},
++	{},
++};
++MODULE_DEVICE_TABLE(i2c, stdp4028_i2c_table);
++
++static const struct of_device_id stdp4028_match[] = {
++	{ .compatible = "megachips,stdp4028-lvds-dp" },
++	{},
++};
++MODULE_DEVICE_TABLE(of, stdp4028_match);
++
++static struct i2c_driver stdp4028_driver = {
++	.id_table	= stdp4028_i2c_table,
++	.probe		= stdp4028_probe,
++	.remove		= stdp4028_remove,
++	.driver		= {
++		.name		= "stdp4028-lvds-dp",
++		.of_match_table	= stdp4028_match,
++	},
++};
++module_i2c_driver(stdp4028_driver);
++
++MODULE_AUTHOR("Vadim V. Vlasov <vvv19xx at gmail.com>");
++MODULE_DESCRIPTION("STDP4028 LVDS to DP display bridge)");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/gpu/drm/bridge/synopsys/Kconfig b/drivers/gpu/drm/bridge/synopsys/Kconfig
+index 21a1be3ced0..2f97f25020a 100644
+--- a/drivers/gpu/drm/bridge/synopsys/Kconfig
++++ b/drivers/gpu/drm/bridge/synopsys/Kconfig
+@@ -39,3 +39,21 @@ config DRM_DW_MIPI_DSI
+ 	select DRM_KMS_HELPER
+ 	select DRM_MIPI_DSI
+ 	select DRM_PANEL_BRIDGE
++
++config DRM_BAIKAL_HDMI
++	tristate "Baikal-M HDMI transmitter"
++	default m if ARCH_BAIKAL
++	select DRM_DW_HDMI
++	help
++	  Choose this if you want to use HDMI on Baikal-M.
++
++config DRM_BAIKAL_HDMI_AHB_AUDIO
++	tristate "Baikal-M HDMI Audio interface"
++	depends on DRM_BAIKAL_HDMI && SND && (DRM_DW_HDMI_AHB_AUDIO != y && DRM_DW_HDMI_AHB_AUDIO != m)
++	default m if ARCH_BAIKAL
++	select SND_PCM
++	select SND_PCM_ELD
++	select SND_PCM_IEC958
++	help
++	  Support the AHB Audio interface which is part of the
++	  Baikal-M HDMI Tx block.
+diff --git a/drivers/gpu/drm/bridge/synopsys/Makefile b/drivers/gpu/drm/bridge/synopsys/Makefile
+index 91d746ad5de..64e6637d16b 100644
+--- a/drivers/gpu/drm/bridge/synopsys/Makefile
++++ b/drivers/gpu/drm/bridge/synopsys/Makefile
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ obj-$(CONFIG_DRM_DW_HDMI) += dw-hdmi.o
+ obj-$(CONFIG_DRM_DW_HDMI_AHB_AUDIO) += dw-hdmi-ahb-audio.o
++obj-$(CONFIG_DRM_BAIKAL_HDMI_AHB_AUDIO) += baikal-hdmi-ahb-audio.o
+ obj-$(CONFIG_DRM_DW_HDMI_I2S_AUDIO) += dw-hdmi-i2s-audio.o
+ obj-$(CONFIG_DRM_DW_HDMI_CEC) += dw-hdmi-cec.o
+ 
+diff --git a/drivers/gpu/drm/bridge/synopsys/baikal-hdmi-ahb-audio.c b/drivers/gpu/drm/bridge/synopsys/baikal-hdmi-ahb-audio.c
+new file mode 100644
+index 00000000000..631f6312364
+--- /dev/null
++++ b/drivers/gpu/drm/bridge/synopsys/baikal-hdmi-ahb-audio.c
+@@ -0,0 +1,686 @@
++/*
++ * Baikal Electronics BE-M1000 DesignWare HDMI AHB audio driver
++ *
++ * Copyright (C) 2020 Baikal Electronics JSC
++ *
++ * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
++ *
++ * Parts of this file were based on sources as follows:
++ *
++ * DesignWare HDMI audio driver
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ * Written and tested against the Designware HDMI Tx found in iMX6.
++ */
++#include <linux/io.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <drm/bridge/dw_hdmi.h>
++#include <drm/drm_edid.h>
++
++#include <sound/asoundef.h>
++#include <sound/core.h>
++#include <sound/initval.h>
++#include <sound/pcm.h>
++#include <sound/pcm_drm_eld.h>
++#include <sound/pcm_iec958.h>
++
++#include "dw-hdmi-audio.h"
++
++#define DRIVER_NAME "dw-hdmi-ahb-audio"
++
++#define BAIKAL_HDMI_REG_SHIFT  2
++
++/* Provide some bits rather than bit offsets */
++enum {
++	HDMI_AHB_DMA_CONF0_SW_FIFO_RST = BIT(7),
++	HDMI_AHB_DMA_CONF0_EN_HLOCK = BIT(3),
++	HDMI_AHB_DMA_START_START = BIT(0),
++	HDMI_AHB_DMA_STOP_STOP = BIT(0),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_OVERRUN = BIT(6),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_ERROR = BIT(5),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_LOST = BIT(4),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_RETRY = BIT(3),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_DONE = BIT(2),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_BUFFFULL = BIT(1),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_BUFFEMPTY = BIT(0),
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL =
++		HDMI_IH_MUTE_AHBDMAAUD_STAT0_OVERRUN |
++		HDMI_IH_MUTE_AHBDMAAUD_STAT0_ERROR |
++		HDMI_IH_MUTE_AHBDMAAUD_STAT0_LOST |
++		HDMI_IH_MUTE_AHBDMAAUD_STAT0_RETRY |
++		HDMI_IH_MUTE_AHBDMAAUD_STAT0_DONE |
++		HDMI_IH_MUTE_AHBDMAAUD_STAT0_BUFFFULL |
++		HDMI_IH_MUTE_AHBDMAAUD_STAT0_BUFFEMPTY,
++	HDMI_IH_AHBDMAAUD_STAT0_OVERRUN = BIT(6),
++	HDMI_IH_AHBDMAAUD_STAT0_ERROR = BIT(5),
++	HDMI_IH_AHBDMAAUD_STAT0_LOST = BIT(4),
++	HDMI_IH_AHBDMAAUD_STAT0_RETRY = BIT(3),
++	HDMI_IH_AHBDMAAUD_STAT0_DONE = BIT(2),
++	HDMI_IH_AHBDMAAUD_STAT0_BUFFFULL = BIT(1),
++	HDMI_IH_AHBDMAAUD_STAT0_BUFFEMPTY = BIT(0),
++	HDMI_IH_AHBDMAAUD_STAT0_ALL =
++		HDMI_IH_AHBDMAAUD_STAT0_OVERRUN |
++		HDMI_IH_AHBDMAAUD_STAT0_ERROR |
++		HDMI_IH_AHBDMAAUD_STAT0_LOST |
++		HDMI_IH_AHBDMAAUD_STAT0_RETRY |
++		HDMI_IH_AHBDMAAUD_STAT0_DONE |
++		HDMI_IH_AHBDMAAUD_STAT0_BUFFFULL |
++		HDMI_IH_AHBDMAAUD_STAT0_BUFFEMPTY,
++	HDMI_AHB_DMA_CONF0_INCR16 = 2 << 1,
++	HDMI_AHB_DMA_CONF0_INCR8 = 1 << 1,
++	HDMI_AHB_DMA_CONF0_INCR4 = 0,
++	HDMI_AHB_DMA_CONF0_BURST_MODE = BIT(0),
++	HDMI_AHB_DMA_MASK_DONE = BIT(7),
++
++	HDMI_REVISION_ID = 0x0001,
++	HDMI_IH_AHBDMAAUD_STAT0 = 0x0109,
++	HDMI_IH_MUTE_AHBDMAAUD_STAT0 = 0x0189,
++	HDMI_FC_AUDICONF2 = 0x1027,
++	HDMI_FC_AUDSCONF = 0x1063,
++	HDMI_FC_AUDSCONF_LAYOUT1 = 1 << 0,
++	HDMI_FC_AUDSCONF_LAYOUT0 = 0 << 0,
++	HDMI_AHB_DMA_CONF0 = 0x3600,
++	HDMI_AHB_DMA_START = 0x3601,
++	HDMI_AHB_DMA_STOP = 0x3602,
++	HDMI_AHB_DMA_THRSLD = 0x3603,
++	HDMI_AHB_DMA_STRADDR0 = 0x3604,
++	HDMI_AHB_DMA_STPADDR0 = 0x3608,
++	HDMI_AHB_DMA_MASK = 0x3614,
++	HDMI_AHB_DMA_POL = 0x3615,
++	HDMI_AHB_DMA_CONF1 = 0x3616,
++	HDMI_AHB_DMA_BUFFPOL = 0x361a,
++};
++
++struct dw_hdmi_channel_conf {
++	u8 conf1;
++	u8 ca;
++};
++
++/*
++ * The default mapping of ALSA channels to HDMI channels and speaker
++ * allocation bits.  Note that we can't do channel remapping here -
++ * channels must be in the same order.
++ *
++ * Mappings for alsa-lib pcm/surround*.conf files:
++ *
++ *		Front	Sur4.0	Sur4.1	Sur5.0	Sur5.1	Sur7.1
++ * Channels	2	4	6	6	6	8
++ *
++ * Our mapping from ALSA channel to CEA686D speaker name and HDMI channel:
++ *
++ *				Number of ALSA channels
++ * ALSA Channel	2	3	4	5	6	7	8
++ * 0		FL:0	=	=	=	=	=	=
++ * 1		FR:1	=	=	=	=	=	=
++ * 2			FC:3	RL:4	LFE:2	=	=	=
++ * 3				RR:5	RL:4	FC:3	=	=
++ * 4					RR:5	RL:4	=	=
++ * 5						RR:5	=	=
++ * 6							RC:6	=
++ * 7							RLC/FRC	RLC/FRC
++ */
++static struct dw_hdmi_channel_conf default_hdmi_channel_config[7] = {
++	{ 0x03, 0x00 },	/* FL,FR */
++	{ 0x0b, 0x02 },	/* FL,FR,FC */
++	{ 0x33, 0x08 },	/* FL,FR,RL,RR */
++	{ 0x37, 0x09 },	/* FL,FR,LFE,RL,RR */
++	{ 0x3f, 0x0b },	/* FL,FR,LFE,FC,RL,RR */
++	{ 0x7f, 0x0f },	/* FL,FR,LFE,FC,RL,RR,RC */
++	{ 0xff, 0x13 },	/* FL,FR,LFE,FC,RL,RR,[FR]RC,[FR]LC */
++};
++
++struct snd_dw_hdmi {
++	struct snd_card *card;
++	struct snd_pcm *pcm;
++	spinlock_t lock;
++	struct dw_hdmi_audio_data data;
++	struct snd_pcm_substream *substream;
++	void (*reformat)(struct snd_dw_hdmi *, size_t, size_t);
++	void *buf_src;
++	void *buf_dst;
++	dma_addr_t buf_addr;
++	unsigned buf_offset;
++	unsigned buf_period;
++	unsigned buf_size;
++	unsigned channels;
++	u8 revision;
++	u8 iec_offset;
++	u8 cs[192][8];
++};
++
++static inline void baikal_hdmi_writeb(u8 val, void __iomem *base, uint offset)
++{
++	writeb(val, base + (offset << BAIKAL_HDMI_REG_SHIFT));
++}
++
++static inline void baikal_hdmi_writeb_relaxed(u8 val, void __iomem *base, uint offset)
++{
++	writeb_relaxed(val, base + (offset << BAIKAL_HDMI_REG_SHIFT));
++}
++
++static inline u8 baikal_hdmi_readb_relaxed(void __iomem *base, uint offset)
++{
++	return readb_relaxed(base + (offset << BAIKAL_HDMI_REG_SHIFT));
++}
++
++static void baikal_hdmi_writel(u32 val, void __iomem *base, uint offset)
++{
++	writeb_relaxed(val, base + (offset << BAIKAL_HDMI_REG_SHIFT));
++	writeb_relaxed(val >> 8, base + ((offset + 1) << BAIKAL_HDMI_REG_SHIFT));
++	writeb_relaxed(val >> 16, base + ((offset + 2) << BAIKAL_HDMI_REG_SHIFT));
++	writeb_relaxed(val >> 24, base + ((offset + 3) << BAIKAL_HDMI_REG_SHIFT));
++}
++
++/*
++ * Convert to hardware format: The userspace buffer contains IEC958 samples,
++ * with the PCUV bits in bits 31..28 and audio samples in bits 27..4.  We
++ * need these to be in bits 27..24, with the IEC B bit in bit 28, and audio
++ * samples in 23..0.
++ *
++ * Default preamble in bits 3..0: 8 = block start, 4 = even 2 = odd
++ *
++ * Ideally, we could do with having the data properly formatted in userspace.
++ */
++static void dw_hdmi_reformat_iec958(struct snd_dw_hdmi *dw,
++	size_t offset, size_t bytes)
++{
++	u32 *src = dw->buf_src + offset;
++	u32 *dst = dw->buf_dst + offset;
++	u32 *end = dw->buf_src + offset + bytes;
++
++	do {
++		u32 b, sample = *src++;
++
++		b = (sample & 8) << (28 - 3);
++
++		sample >>= 4;
++
++		*dst++ = sample | b;
++	} while (src < end);
++}
++
++static u32 parity(u32 sample)
++{
++	sample ^= sample >> 16;
++	sample ^= sample >> 8;
++	sample ^= sample >> 4;
++	sample ^= sample >> 2;
++	sample ^= sample >> 1;
++	return (sample & 1) << 27;
++}
++
++static void dw_hdmi_reformat_s24(struct snd_dw_hdmi *dw,
++	size_t offset, size_t bytes)
++{
++	u32 *src = dw->buf_src + offset;
++	u32 *dst = dw->buf_dst + offset;
++	u32 *end = dw->buf_src + offset + bytes;
++
++	do {
++		unsigned i;
++		u8 *cs;
++
++		cs = dw->cs[dw->iec_offset++];
++		if (dw->iec_offset >= 192)
++			dw->iec_offset = 0;
++
++		i = dw->channels;
++		do {
++			u32 sample = *src++;
++
++			sample &= ~0xff000000;
++			sample |= *cs++ << 24;
++			sample |= parity(sample & ~0xf8000000);
++
++			*dst++ = sample;
++		} while (--i);
++	} while (src < end);
++}
++
++static void dw_hdmi_create_cs(struct snd_dw_hdmi *dw,
++	struct snd_pcm_runtime *runtime)
++{
++	u8 cs[4];
++	unsigned ch, i, j;
++
++	snd_pcm_create_iec958_consumer(runtime, cs, sizeof(cs));
++
++	memset(dw->cs, 0, sizeof(dw->cs));
++
++	for (ch = 0; ch < 8; ch++) {
++		cs[2] &= ~IEC958_AES2_CON_CHANNEL;
++		cs[2] |= (ch + 1) << 4;
++
++		for (i = 0; i < ARRAY_SIZE(cs); i++) {
++			unsigned c = cs[i];
++
++			for (j = 0; j < 8; j++, c >>= 1)
++				dw->cs[i * 8 + j][ch] = (c & 1) << 2;
++		}
++	}
++	dw->cs[0][0] |= BIT(4);
++}
++
++static void dw_hdmi_start_dma(struct snd_dw_hdmi *dw)
++{
++	void __iomem *base = dw->data.base;
++	unsigned offset = dw->buf_offset;
++	unsigned period = dw->buf_period;
++	u32 start, stop;
++
++	dw->reformat(dw, offset, period);
++
++	/* Clear all irqs before enabling irqs and starting DMA */
++	baikal_hdmi_writeb_relaxed(HDMI_IH_AHBDMAAUD_STAT0_ALL,
++		       base, HDMI_IH_AHBDMAAUD_STAT0);
++
++	start = dw->buf_addr + offset;
++	stop = start + period - 1;
++
++	/* Setup the hardware start/stop addresses */
++	baikal_hdmi_writel(start, base, HDMI_AHB_DMA_STRADDR0);
++	baikal_hdmi_writel(stop, base, HDMI_AHB_DMA_STPADDR0);
++
++	baikal_hdmi_writeb_relaxed((u8)~HDMI_AHB_DMA_MASK_DONE, base, HDMI_AHB_DMA_MASK);
++	baikal_hdmi_writeb(HDMI_AHB_DMA_START_START, base, HDMI_AHB_DMA_START);
++
++	offset += period;
++	if (offset >= dw->buf_size)
++		offset = 0;
++	dw->buf_offset = offset;
++}
++
++static void dw_hdmi_stop_dma(struct snd_dw_hdmi *dw)
++{
++	/* Disable interrupts before disabling DMA */
++	baikal_hdmi_writeb_relaxed(~0, dw->data.base, HDMI_AHB_DMA_MASK);
++	baikal_hdmi_writeb_relaxed(HDMI_AHB_DMA_STOP_STOP, dw->data.base, HDMI_AHB_DMA_STOP);
++}
++
++static irqreturn_t snd_dw_hdmi_irq(int irq, void *data)
++{
++	struct snd_dw_hdmi *dw = data;
++	struct snd_pcm_substream *substream;
++	unsigned stat;
++
++	stat = baikal_hdmi_readb_relaxed(dw->data.base, HDMI_IH_AHBDMAAUD_STAT0);
++	if (!stat)
++		return IRQ_NONE;
++
++	baikal_hdmi_writeb_relaxed(stat, dw->data.base, HDMI_IH_AHBDMAAUD_STAT0);
++
++	substream = dw->substream;
++	if (stat & HDMI_IH_AHBDMAAUD_STAT0_DONE && substream) {
++		snd_pcm_period_elapsed(substream);
++
++		spin_lock(&dw->lock);
++		if (dw->substream)
++			dw_hdmi_start_dma(dw);
++		spin_unlock(&dw->lock);
++	}
++
++	return IRQ_HANDLED;
++}
++
++static struct snd_pcm_hardware dw_hdmi_hw = {
++	.info = SNDRV_PCM_INFO_INTERLEAVED |
++		SNDRV_PCM_INFO_BLOCK_TRANSFER |
++		SNDRV_PCM_INFO_MMAP |
++		SNDRV_PCM_INFO_MMAP_VALID,
++	.formats = SNDRV_PCM_FMTBIT_IEC958_SUBFRAME_LE |
++		   SNDRV_PCM_FMTBIT_S24_LE,
++	.rates = SNDRV_PCM_RATE_32000 |
++		 SNDRV_PCM_RATE_44100 |
++		 SNDRV_PCM_RATE_48000 |
++		 SNDRV_PCM_RATE_88200 |
++		 SNDRV_PCM_RATE_96000 |
++		 SNDRV_PCM_RATE_176400 |
++		 SNDRV_PCM_RATE_192000,
++	.channels_min = 2,
++	.channels_max = 8,
++	.buffer_bytes_max = 1024 * 1024,
++	.period_bytes_min = 256,
++	.period_bytes_max = 8192,	/* ERR004323: must limit to 8k */
++	.periods_min = 2,
++	.periods_max = 16,
++	.fifo_size = 0,
++};
++
++static int dw_hdmi_open(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct snd_dw_hdmi *dw = substream->private_data;
++	void __iomem *base = dw->data.base;
++	int ret;
++
++	runtime->hw = dw_hdmi_hw;
++
++	ret = snd_pcm_hw_constraint_eld(runtime, dw->data.eld);
++	if (ret < 0)
++		return ret;
++
++	ret = snd_pcm_limit_hw_rates(runtime);
++	if (ret < 0)
++		return ret;
++
++	ret = snd_pcm_hw_constraint_integer(runtime,
++					    SNDRV_PCM_HW_PARAM_PERIODS);
++	if (ret < 0)
++		return ret;
++
++	/* Limit the buffer size to the size of the preallocated buffer */
++	ret = snd_pcm_hw_constraint_minmax(runtime,
++					   SNDRV_PCM_HW_PARAM_BUFFER_SIZE,
++					   0, substream->dma_buffer.bytes);
++	if (ret < 0)
++		return ret;
++
++	/* Clear FIFO */
++	baikal_hdmi_writeb_relaxed(HDMI_AHB_DMA_CONF0_SW_FIFO_RST,
++		       base, HDMI_AHB_DMA_CONF0);
++
++	/* Configure interrupt polarities */
++	baikal_hdmi_writeb_relaxed(~0, base, HDMI_AHB_DMA_POL);
++	baikal_hdmi_writeb_relaxed(~0, base, HDMI_AHB_DMA_BUFFPOL);
++
++	/* Keep interrupts masked, and clear any pending */
++	baikal_hdmi_writeb_relaxed(~0, base, HDMI_AHB_DMA_MASK);
++	baikal_hdmi_writeb_relaxed(~0, base, HDMI_IH_AHBDMAAUD_STAT0);
++
++	ret = request_irq(dw->data.irq, snd_dw_hdmi_irq, IRQF_SHARED,
++			  "dw-hdmi-audio", dw);
++	if (ret)
++		return ret;
++
++	/* Un-mute done interrupt */
++	baikal_hdmi_writeb_relaxed(HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL &
++		       ~HDMI_IH_MUTE_AHBDMAAUD_STAT0_DONE,
++		       base, HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++
++	return 0;
++}
++
++static int dw_hdmi_close(struct snd_pcm_substream *substream)
++{
++	struct snd_dw_hdmi *dw = substream->private_data;
++
++	/* Mute all interrupts */
++	baikal_hdmi_writeb_relaxed(HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL,
++		       dw->data.base, HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++
++	free_irq(dw->data.irq, dw);
++
++	return 0;
++}
++
++static int dw_hdmi_hw_free(struct snd_pcm_substream *substream)
++{
++	return snd_pcm_lib_free_vmalloc_buffer(substream);
++}
++
++static int dw_hdmi_hw_params(struct snd_pcm_substream *substream,
++	struct snd_pcm_hw_params *params)
++{
++	/* Allocate the PCM runtime buffer, which is exposed to userspace. */
++	return snd_pcm_lib_alloc_vmalloc_buffer(substream,
++						params_buffer_bytes(params));
++}
++
++static int dw_hdmi_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct snd_dw_hdmi *dw = substream->private_data;
++	u8 threshold, conf0, conf1, layout, ca;
++
++	/* Setup as per 3.0.5 FSL 4.1.0 BSP */
++	switch (dw->revision) {
++	case 0x0a:
++		conf0 = HDMI_AHB_DMA_CONF0_BURST_MODE |
++			HDMI_AHB_DMA_CONF0_INCR4;
++		if (runtime->channels == 2)
++			threshold = 126;
++		else
++			threshold = 124;
++		break;
++	case 0x1a:
++		conf0 = HDMI_AHB_DMA_CONF0_BURST_MODE |
++			HDMI_AHB_DMA_CONF0_INCR8;
++		threshold = 128;
++		break;
++	case 0x2a: /* this revision is used in Baikal-M SoC */
++		conf0 = HDMI_AHB_DMA_CONF0_BURST_MODE |
++			HDMI_AHB_DMA_CONF0_INCR16;
++		threshold = 128;
++		break;
++	default:
++		/* NOTREACHED */
++		return -EINVAL;
++	}
++
++	dw_hdmi_set_sample_rate(dw->data.hdmi, runtime->rate);
++
++	/* Minimum number of bytes in the fifo. */
++	runtime->hw.fifo_size = threshold * 32;
++
++	conf0 |= HDMI_AHB_DMA_CONF0_EN_HLOCK;
++	conf1 = default_hdmi_channel_config[runtime->channels - 2].conf1;
++	ca = default_hdmi_channel_config[runtime->channels - 2].ca;
++
++	/*
++	 * For >2 channel PCM audio, we need to select layout 1
++	 * and set an appropriate channel map.
++	 */
++	if (runtime->channels > 2)
++		layout = HDMI_FC_AUDSCONF_LAYOUT1;
++	else
++		layout = HDMI_FC_AUDSCONF_LAYOUT0;
++
++	baikal_hdmi_writeb_relaxed(threshold, dw->data.base, HDMI_AHB_DMA_THRSLD);
++	baikal_hdmi_writeb_relaxed(conf0, dw->data.base, HDMI_AHB_DMA_CONF0);
++	baikal_hdmi_writeb_relaxed(conf1, dw->data.base, HDMI_AHB_DMA_CONF1);
++	baikal_hdmi_writeb_relaxed(layout, dw->data.base, HDMI_FC_AUDSCONF);
++	baikal_hdmi_writeb_relaxed(ca, dw->data.base, HDMI_FC_AUDICONF2);
++
++	switch (runtime->format) {
++	case SNDRV_PCM_FORMAT_IEC958_SUBFRAME_LE:
++		dw->reformat = dw_hdmi_reformat_iec958;
++		break;
++	case SNDRV_PCM_FORMAT_S24_LE:
++		dw_hdmi_create_cs(dw, runtime);
++		dw->reformat = dw_hdmi_reformat_s24;
++		break;
++	}
++	dw->iec_offset = 0;
++	dw->channels = runtime->channels;
++	dw->buf_src  = runtime->dma_area;
++	dw->buf_dst  = substream->dma_buffer.area;
++	dw->buf_addr = substream->dma_buffer.addr;
++	dw->buf_period = snd_pcm_lib_period_bytes(substream);
++	dw->buf_size = snd_pcm_lib_buffer_bytes(substream);
++
++	return 0;
++}
++
++static int dw_hdmi_trigger(struct snd_pcm_substream *substream, int cmd)
++{
++	struct snd_dw_hdmi *dw = substream->private_data;
++	unsigned long flags;
++	int ret = 0;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++		spin_lock_irqsave(&dw->lock, flags);
++		dw->buf_offset = 0;
++		dw->substream = substream;
++		dw_hdmi_start_dma(dw);
++		dw_hdmi_audio_enable(dw->data.hdmi);
++		spin_unlock_irqrestore(&dw->lock, flags);
++		substream->runtime->delay = substream->runtime->period_size;
++		break;
++
++	case SNDRV_PCM_TRIGGER_STOP:
++		spin_lock_irqsave(&dw->lock, flags);
++		dw->substream = NULL;
++		dw_hdmi_stop_dma(dw);
++		dw_hdmi_audio_disable(dw->data.hdmi);
++		spin_unlock_irqrestore(&dw->lock, flags);
++		break;
++
++	default:
++		ret = -EINVAL;
++		break;
++	}
++
++	return ret;
++}
++
++static snd_pcm_uframes_t dw_hdmi_pointer(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct snd_dw_hdmi *dw = substream->private_data;
++
++	/*
++	 * We are unable to report the exact hardware position as
++	 * reading the 32-bit DMA position using 8-bit reads is racy.
++	 */
++	return bytes_to_frames(runtime, dw->buf_offset);
++}
++
++static struct snd_pcm_ops snd_dw_hdmi_ops = {
++	.open = dw_hdmi_open,
++	.close = dw_hdmi_close,
++	.ioctl = snd_pcm_lib_ioctl,
++	.hw_params = dw_hdmi_hw_params,
++	.hw_free = dw_hdmi_hw_free,
++	.prepare = dw_hdmi_prepare,
++	.trigger = dw_hdmi_trigger,
++	.pointer = dw_hdmi_pointer,
++	.page = snd_pcm_lib_get_vmalloc_page,
++};
++
++static int snd_dw_hdmi_probe(struct platform_device *pdev)
++{
++	const struct dw_hdmi_audio_data *data = pdev->dev.platform_data;
++	struct device *dev = pdev->dev.parent;
++	struct snd_dw_hdmi *dw;
++	struct snd_card *card;
++	struct snd_pcm *pcm;
++	unsigned revision;
++	int ret;
++
++	baikal_hdmi_writeb_relaxed(HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL,
++		       data->base, HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++	revision = baikal_hdmi_readb_relaxed(data->base, HDMI_REVISION_ID);
++	if (revision != 0x0a && revision != 0x1a && revision != 0x2a) {
++		dev_err(dev, "dw-hdmi-audio: unknown revision 0x%02x\n",
++			revision);
++		return -ENXIO;
++	}
++
++	ret = snd_card_new(dev, SNDRV_DEFAULT_IDX1, SNDRV_DEFAULT_STR1,
++			      THIS_MODULE, sizeof(struct snd_dw_hdmi), &card);
++	if (ret < 0)
++		return ret;
++
++	strlcpy(card->driver, DRIVER_NAME, sizeof(card->driver));
++	strlcpy(card->shortname, "DW-HDMI", sizeof(card->shortname));
++	snprintf(card->longname, sizeof(card->longname),
++		 "%s rev 0x%02x, irq %d", card->shortname, revision,
++		 data->irq);
++
++	dw = card->private_data;
++	dw->card = card;
++	dw->data = *data;
++	dw->revision = revision;
++
++	spin_lock_init(&dw->lock);
++
++	ret = snd_pcm_new(card, "DW HDMI", 0, 1, 0, &pcm);
++	if (ret < 0)
++		goto err;
++
++	dw->pcm = pcm;
++	pcm->private_data = dw;
++	strlcpy(pcm->name, DRIVER_NAME, sizeof(pcm->name));
++	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &snd_dw_hdmi_ops);
++
++	/*
++	 * To support 8-channel 96kHz audio reliably, we need 512k
++	 * to satisfy alsa with our restricted period (ERR004323).
++	 */
++	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_DEV,
++			dev, 128 * 1024, 1024 * 1024);
++
++	ret = snd_card_register(card);
++	if (ret < 0)
++		goto err;
++
++	platform_set_drvdata(pdev, dw);
++
++	return 0;
++
++err:
++	snd_card_free(card);
++	return ret;
++}
++
++static int snd_dw_hdmi_remove(struct platform_device *pdev)
++{
++	struct snd_dw_hdmi *dw = platform_get_drvdata(pdev);
++
++	snd_card_free(dw->card);
++
++	return 0;
++}
++
++#if defined(CONFIG_PM_SLEEP) && defined(IS_NOT_BROKEN)
++/*
++ * This code is fine, but requires implementation in the dw_hdmi_trigger()
++ * method which is currently missing as I have no way to test this.
++ */
++static int snd_dw_hdmi_suspend(struct device *dev)
++{
++	struct snd_dw_hdmi *dw = dev_get_drvdata(dev);
++
++	snd_power_change_state(dw->card, SNDRV_CTL_POWER_D3cold);
++	snd_pcm_suspend_all(dw->pcm);
++
++	return 0;
++}
++
++static int snd_dw_hdmi_resume(struct device *dev)
++{
++	struct snd_dw_hdmi *dw = dev_get_drvdata(dev);
++
++	snd_power_change_state(dw->card, SNDRV_CTL_POWER_D0);
++
++	return 0;
++}
++
++static SIMPLE_DEV_PM_OPS(snd_dw_hdmi_pm, snd_dw_hdmi_suspend,
++			 snd_dw_hdmi_resume);
++#define PM_OPS &snd_dw_hdmi_pm
++#else
++#define PM_OPS NULL
++#endif
++
++static struct platform_driver snd_dw_hdmi_driver = {
++	.probe	= snd_dw_hdmi_probe,
++	.remove	= snd_dw_hdmi_remove,
++	.driver	= {
++		.name = DRIVER_NAME,
++		.pm = PM_OPS,
++	},
++};
++
++module_platform_driver(snd_dw_hdmi_driver);
++
++MODULE_AUTHOR("Russell King <rmk+kernel@arm.linux.org.uk>");
++MODULE_DESCRIPTION("Synopsis Designware HDMI AHB ALSA interface");
++MODULE_LICENSE("GPL v2");
++MODULE_ALIAS("platform:" DRIVER_NAME);
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi-ahb-audio.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi-ahb-audio.c
+index d0db1acf11d..8444a6476d5 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi-ahb-audio.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi-ahb-audio.c
+@@ -132,12 +132,25 @@ struct snd_dw_hdmi {
+ 	u8 cs[192][8];
+ };
+ 
+-static void dw_hdmi_writel(u32 val, void __iomem *ptr)
++static inline void hdmi_writeb(const struct dw_hdmi_audio_data *data, u8 val,
++			       int offset)
+ {
++	writeb(val, data->base + (offset << data->reg_shift));
++}
++
++static inline u8 hdmi_readb(const struct dw_hdmi_audio_data *data, int offset)
++{
++	return readb_relaxed(data->base + (offset << data->reg_shift));
++}
++
++static void dw_hdmi_writel(struct dw_hdmi_audio_data *data, u32 val, int offset)
++{
++	void __iomem *ptr = data->base + (offset << data->reg_shift);
++
+ 	writeb_relaxed(val, ptr);
+-	writeb_relaxed(val >> 8, ptr + 1);
+-	writeb_relaxed(val >> 16, ptr + 2);
+-	writeb_relaxed(val >> 24, ptr + 3);
++	writeb_relaxed(val >> 8, ptr + (1 << data->reg_shift));
++	writeb_relaxed(val >> 16, ptr + (2 << data->reg_shift));
++	writeb_relaxed(val >> 24, ptr + (3 << data->reg_shift));
+ }
+ 
+ /*
+@@ -232,7 +245,6 @@ static void dw_hdmi_create_cs(struct snd_dw_hdmi *dw,
+ 
+ static void dw_hdmi_start_dma(struct snd_dw_hdmi *dw)
+ {
+-	void __iomem *base = dw->data.base;
+ 	unsigned offset = dw->buf_offset;
+ 	unsigned period = dw->buf_period;
+ 	u32 start, stop;
+@@ -240,18 +252,18 @@ static void dw_hdmi_start_dma(struct snd_dw_hdmi *dw)
+ 	dw->reformat(dw, offset, period);
+ 
+ 	/* Clear all irqs before enabling irqs and starting DMA */
+-	writeb_relaxed(HDMI_IH_AHBDMAAUD_STAT0_ALL,
+-		       base + HDMI_IH_AHBDMAAUD_STAT0);
++	hdmi_writeb(&dw->data, HDMI_IH_AHBDMAAUD_STAT0_ALL,
++		    HDMI_IH_AHBDMAAUD_STAT0);
+ 
+ 	start = dw->buf_addr + offset;
+ 	stop = start + period - 1;
+ 
+ 	/* Setup the hardware start/stop addresses */
+-	dw_hdmi_writel(start, base + HDMI_AHB_DMA_STRADDR0);
+-	dw_hdmi_writel(stop, base + HDMI_AHB_DMA_STPADDR0);
++	dw_hdmi_writel(&dw->data, start, HDMI_AHB_DMA_STRADDR0);
++	dw_hdmi_writel(&dw->data, stop, HDMI_AHB_DMA_STPADDR0);
+ 
+-	writeb_relaxed((u8)~HDMI_AHB_DMA_MASK_DONE, base + HDMI_AHB_DMA_MASK);
+-	writeb(HDMI_AHB_DMA_START_START, base + HDMI_AHB_DMA_START);
++	hdmi_writeb(&dw->data, (u8)~HDMI_AHB_DMA_MASK_DONE, HDMI_AHB_DMA_MASK);
++	hdmi_writeb(&dw->data, HDMI_AHB_DMA_START_START, HDMI_AHB_DMA_START);
+ 
+ 	offset += period;
+ 	if (offset >= dw->buf_size)
+@@ -262,8 +274,8 @@ static void dw_hdmi_start_dma(struct snd_dw_hdmi *dw)
+ static void dw_hdmi_stop_dma(struct snd_dw_hdmi *dw)
+ {
+ 	/* Disable interrupts before disabling DMA */
+-	writeb_relaxed(~0, dw->data.base + HDMI_AHB_DMA_MASK);
+-	writeb_relaxed(HDMI_AHB_DMA_STOP_STOP, dw->data.base + HDMI_AHB_DMA_STOP);
++	hdmi_writeb(&dw->data, ~0, HDMI_AHB_DMA_MASK);
++	hdmi_writeb(&dw->data, HDMI_AHB_DMA_STOP_STOP, HDMI_AHB_DMA_STOP);
+ }
+ 
+ static irqreturn_t snd_dw_hdmi_irq(int irq, void *data)
+@@ -272,11 +284,11 @@ static irqreturn_t snd_dw_hdmi_irq(int irq, void *data)
+ 	struct snd_pcm_substream *substream;
+ 	unsigned stat;
+ 
+-	stat = readb_relaxed(dw->data.base + HDMI_IH_AHBDMAAUD_STAT0);
++	stat = hdmi_readb(&dw->data, HDMI_IH_AHBDMAAUD_STAT0);
+ 	if (!stat)
+ 		return IRQ_NONE;
+ 
+-	writeb_relaxed(stat, dw->data.base + HDMI_IH_AHBDMAAUD_STAT0);
++	hdmi_writeb(&dw->data, stat, HDMI_IH_AHBDMAAUD_STAT0);
+ 
+ 	substream = dw->substream;
+ 	if (stat & HDMI_IH_AHBDMAAUD_STAT0_DONE && substream) {
+@@ -319,7 +331,6 @@ static int dw_hdmi_open(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct snd_dw_hdmi *dw = substream->private_data;
+-	void __iomem *base = dw->data.base;
+ 	int ret;
+ 
+ 	runtime->hw = dw_hdmi_hw;
+@@ -345,16 +356,16 @@ static int dw_hdmi_open(struct snd_pcm_substream *substream)
+ 		return ret;
+ 
+ 	/* Clear FIFO */
+-	writeb_relaxed(HDMI_AHB_DMA_CONF0_SW_FIFO_RST,
+-		       base + HDMI_AHB_DMA_CONF0);
++	hdmi_writeb(&dw->data, HDMI_AHB_DMA_CONF0_SW_FIFO_RST,
++		    HDMI_AHB_DMA_CONF0);
+ 
+ 	/* Configure interrupt polarities */
+-	writeb_relaxed(~0, base + HDMI_AHB_DMA_POL);
+-	writeb_relaxed(~0, base + HDMI_AHB_DMA_BUFFPOL);
++	hdmi_writeb(&dw->data, ~0, HDMI_AHB_DMA_POL);
++	hdmi_writeb(&dw->data, ~0, HDMI_AHB_DMA_BUFFPOL);
+ 
+ 	/* Keep interrupts masked, and clear any pending */
+-	writeb_relaxed(~0, base + HDMI_AHB_DMA_MASK);
+-	writeb_relaxed(~0, base + HDMI_IH_AHBDMAAUD_STAT0);
++	hdmi_writeb(&dw->data, ~0, HDMI_AHB_DMA_MASK);
++	hdmi_writeb(&dw->data, ~0, HDMI_IH_AHBDMAAUD_STAT0);
+ 
+ 	ret = request_irq(dw->data.irq, snd_dw_hdmi_irq, IRQF_SHARED,
+ 			  "dw-hdmi-audio", dw);
+@@ -362,9 +373,9 @@ static int dw_hdmi_open(struct snd_pcm_substream *substream)
+ 		return ret;
+ 
+ 	/* Un-mute done interrupt */
+-	writeb_relaxed(HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL &
++	hdmi_writeb(&dw->data, HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL &
+ 		       ~HDMI_IH_MUTE_AHBDMAAUD_STAT0_DONE,
+-		       base + HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++		       HDMI_IH_MUTE_AHBDMAAUD_STAT0);
+ 
+ 	return 0;
+ }
+@@ -374,8 +385,8 @@ static int dw_hdmi_close(struct snd_pcm_substream *substream)
+ 	struct snd_dw_hdmi *dw = substream->private_data;
+ 
+ 	/* Mute all interrupts */
+-	writeb_relaxed(HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL,
+-		       dw->data.base + HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++	hdmi_writeb(&dw->data, HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL,
++		    HDMI_IH_MUTE_AHBDMAAUD_STAT0);
+ 
+ 	free_irq(dw->data.irq, dw);
+ 
+@@ -416,6 +427,11 @@ static int dw_hdmi_prepare(struct snd_pcm_substream *substream)
+ 			HDMI_AHB_DMA_CONF0_INCR8;
+ 		threshold = 128;
+ 		break;
++	case 0x2a: /* this revision is used in Baikal-M SoC */
++		conf0 = HDMI_AHB_DMA_CONF0_BURST_MODE |
++			HDMI_AHB_DMA_CONF0_INCR16;
++		threshold = 128;
++		break;
+ 	default:
+ 		/* NOTREACHED */
+ 		return -EINVAL;
+@@ -430,9 +446,9 @@ static int dw_hdmi_prepare(struct snd_pcm_substream *substream)
+ 	conf1 = default_hdmi_channel_config[runtime->channels - 2].conf1;
+ 	ca = default_hdmi_channel_config[runtime->channels - 2].ca;
+ 
+-	writeb_relaxed(threshold, dw->data.base + HDMI_AHB_DMA_THRSLD);
+-	writeb_relaxed(conf0, dw->data.base + HDMI_AHB_DMA_CONF0);
+-	writeb_relaxed(conf1, dw->data.base + HDMI_AHB_DMA_CONF1);
++	hdmi_writeb(&dw->data, threshold, HDMI_AHB_DMA_THRSLD);
++	hdmi_writeb(&dw->data, conf0, HDMI_AHB_DMA_CONF0);
++	hdmi_writeb(&dw->data, conf1, HDMI_AHB_DMA_CONF1);
+ 
+ 	dw_hdmi_set_channel_count(dw->data.hdmi, runtime->channels);
+ 	dw_hdmi_set_channel_allocation(dw->data.hdmi, ca);
+@@ -524,10 +540,11 @@ static int snd_dw_hdmi_probe(struct platform_device *pdev)
+ 	unsigned revision;
+ 	int ret;
+ 
+-	writeb_relaxed(HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL,
+-		       data->base + HDMI_IH_MUTE_AHBDMAAUD_STAT0);
+-	revision = readb_relaxed(data->base + HDMI_REVISION_ID);
+-	if (revision != 0x0a && revision != 0x1a) {
++	hdmi_writeb(data, HDMI_IH_MUTE_AHBDMAAUD_STAT0_ALL,
++		    HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++	revision = hdmi_readb(data, HDMI_REVISION_ID);
++
++	if (revision != 0x0a && revision != 0x1a && revision != 0x2a) {
+ 		dev_err(dev, "dw-hdmi-audio: unknown revision 0x%02x\n",
+ 			revision);
+ 		return -ENXIO;
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi-audio.h b/drivers/gpu/drm/bridge/synopsys/dw-hdmi-audio.h
+index cb07dc0da5a..df33140429f 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi-audio.h
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi-audio.h
+@@ -7,6 +7,7 @@ struct dw_hdmi;
+ struct dw_hdmi_audio_data {
+ 	phys_addr_t phys;
+ 	void __iomem *base;
++	unsigned int reg_shift;
+ 	int irq;
+ 	struct dw_hdmi *hdmi;
+ 	u8 *eld;
+diff --git a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+index f08d0fded61..ddb387ebf2b 100644
+--- a/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-hdmi.c
+@@ -3430,6 +3430,7 @@ struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
+ 		audio.phys = iores->start;
+ 		audio.base = hdmi->regs;
+ 		audio.irq = irq;
++		audio.reg_shift = hdmi->reg_shift;
+ 		audio.hdmi = hdmi;
+ 		audio.eld = hdmi->connector.eld;
+ 		hdmi->enable_audio = dw_hdmi_ahb_audio_enable;
+diff --git a/drivers/gpu/drm/nouveau/nvkm/subdev/instmem/nv50.c b/drivers/gpu/drm/nouveau/nvkm/subdev/instmem/nv50.c
+index 96aca0edfa3..130948c90d4 100644
+--- a/drivers/gpu/drm/nouveau/nvkm/subdev/instmem/nv50.c
++++ b/drivers/gpu/drm/nouveau/nvkm/subdev/instmem/nv50.c
+@@ -107,7 +107,11 @@ nv50_instobj_wr32(struct nvkm_memory *memory, u64 offset, u32 data)
+ static u32
+ nv50_instobj_rd32(struct nvkm_memory *memory, u64 offset)
+ {
++#if IS_ENABLED(CONFIG_ARCH_BAIKAL)
++	return nv50_instobj_rd32_slow(memory, offset);
++#else
+ 	return ioread32_native(nv50_instobj(memory)->map + offset);
++#endif
+ }
+ 
+ static const struct nvkm_memory_ptrs
+diff --git a/drivers/gpu/drm/panfrost/panfrost_devfreq.c b/drivers/gpu/drm/panfrost/panfrost_devfreq.c
+index 194af7f607a..6d4ea222494 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_devfreq.c
++++ b/drivers/gpu/drm/panfrost/panfrost_devfreq.c
+@@ -92,6 +92,11 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
+ 	struct thermal_cooling_device *cooling;
+ 	struct panfrost_devfreq *pfdevfreq = &pfdev->pfdevfreq;
+ 
++	if (of_device_is_compatible(of_root, "baikal,baikal-m")) {
++		DRM_DEV_INFO(dev, "disabling GPU devfreq on BE-M1000\n");
++		return 0;
++	}
++
+ 	if (pfdev->comp->num_supplies > 1) {
+ 		/*
+ 		 * GPUs with more than 1 supply require platform-specific handling:
+diff --git a/drivers/gpu/drm/panfrost/panfrost_gpu.c b/drivers/gpu/drm/panfrost/panfrost_gpu.c
+index bbe628b306e..92157f426f2 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_gpu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_gpu.c
+@@ -63,7 +63,7 @@ int panfrost_gpu_soft_reset(struct panfrost_device *pfdev)
+ 	gpu_write(pfdev, GPU_CMD, GPU_CMD_SOFT_RESET);
+ 
+ 	ret = readl_relaxed_poll_timeout(pfdev->iomem + GPU_INT_RAWSTAT,
+-		val, val & GPU_IRQ_RESET_COMPLETED, 100, 10000);
++		val, val & GPU_IRQ_RESET_COMPLETED, 5, 10000);
+ 
+ 	if (ret) {
+ 		dev_err(pfdev->dev, "gpu soft reset timed out\n");
+@@ -319,35 +319,46 @@ static void panfrost_gpu_init_features(struct panfrost_device *pfdev)
+ void panfrost_gpu_power_on(struct panfrost_device *pfdev)
+ {
+ 	int ret;
+-	u32 val;
++	ktime_t timeout;
+ 
+ 	panfrost_gpu_init_quirks(pfdev);
+ 
+ 	/* Just turn on everything for now */
+ 	gpu_write(pfdev, L2_PWRON_LO, pfdev->features.l2_present);
+-	ret = readl_relaxed_poll_timeout(pfdev->iomem + L2_READY_LO,
+-		val, val == pfdev->features.l2_present, 100, 20000);
+-	if (ret)
+-		dev_err(pfdev->dev, "error powering up gpu L2");
+-
++	//gpu_write(pfdev, STACK_PWRON_LO, pfdev->features.stack_present);
+ 	gpu_write(pfdev, SHADER_PWRON_LO, pfdev->features.shader_present);
+-	ret = readl_relaxed_poll_timeout(pfdev->iomem + SHADER_READY_LO,
+-		val, val == pfdev->features.shader_present, 100, 20000);
+-	if (ret)
+-		dev_err(pfdev->dev, "error powering up gpu shader");
+-
+ 	gpu_write(pfdev, TILER_PWRON_LO, pfdev->features.tiler_present);
+-	ret = readl_relaxed_poll_timeout(pfdev->iomem + TILER_READY_LO,
+-		val, val == pfdev->features.tiler_present, 100, 1000);
++
++	timeout = ktime_add_us(ktime_get(), 1000);
++	ret = 0;
++	for (;;) {
++	if (gpu_read(pfdev, L2_READY_LO) ==
++			pfdev->features.l2_present &&
++			/*gpu_read(pfdev, STACK_READY_LO) ==
++			pfdev->features.stack_present &&*/
++		    gpu_read(pfdev, SHADER_READY_LO) ==
++			pfdev->features.shader_present &&
++		    gpu_read(pfdev, TILER_READY_LO) ==
++			pfdev->features.tiler_present)
++			break;
++		if (ktime_compare(ktime_get(), timeout) > 0) {
++			ret = 1;
++			break;
++		}
++		usleep_range(3, 5);
++	}
++
+ 	if (ret)
+ 		dev_err(pfdev->dev, "error powering up gpu tiler");
+ }
+ 
+ void panfrost_gpu_power_off(struct panfrost_device *pfdev)
+ {
+-	gpu_write(pfdev, TILER_PWROFF_LO, 0);
+-	gpu_write(pfdev, SHADER_PWROFF_LO, 0);
+-	gpu_write(pfdev, L2_PWROFF_LO, 0);
++	dev_dbg(pfdev->dev, "gpu_power_off...\n");
++	gpu_write(pfdev, TILER_PWROFF_LO, pfdev->features.tiler_present);
++	gpu_write(pfdev, SHADER_PWROFF_LO, pfdev->features.shader_present);
++	//gpu_write(pfdev, STACK_PWROFF_LO, pfdev->features.stack_present);
++	gpu_write(pfdev, L2_PWROFF_LO, pfdev->features.l2_present);
+ }
+ 
+ int panfrost_gpu_init(struct panfrost_device *pfdev)
+diff --git a/drivers/gpu/drm/panfrost/panfrost_job.c b/drivers/gpu/drm/panfrost/panfrost_job.c
+index 908d7952085..031c555b967 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_job.c
++++ b/drivers/gpu/drm/panfrost/panfrost_job.c
+@@ -136,6 +136,8 @@ static void panfrost_job_write_affinity(struct panfrost_device *pfdev,
+ 	 * multiple (2) coherent core groups
+ 	 */
+ 	affinity = pfdev->features.shader_present;
++	if (panfrost_model_eq(pfdev, 0x620) && js == 1)
++		affinity &= 0xf;
+ 
+ 	job_write(pfdev, JS_AFFINITY_NEXT_LO(js), lower_32_bits(affinity));
+ 	job_write(pfdev, JS_AFFINITY_NEXT_HI(js), upper_32_bits(affinity));
+@@ -715,7 +717,7 @@ static enum drm_gpu_sched_stat panfrost_job_timedout(struct drm_sched_job
+ 	if (dma_fence_is_signaled(job->done_fence))
+ 		return DRM_GPU_SCHED_STAT_NOMINAL;
+ 
+-	dev_err(pfdev->dev, "gpu sched timeout, js=%d, config=0x%x, status=0x%x, head=0x%x, tail=0x%x, sched_job=%p",
++	dev_err(pfdev->dev, "gpu sched timeout, js=%d, config=0x%x, status=0x%x, head=0x%x, tail=0x%x, sched_job=%px",
+ 		js,
+ 		job_read(pfdev, JS_CONFIG(js)),
+ 		job_read(pfdev, JS_STATUS(js)),
+diff --git a/drivers/gpu/drm/panfrost/panfrost_mmu.c b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+index f51d3f791a1..90ffab455f5 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_mmu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+@@ -34,7 +34,7 @@ static int wait_ready(struct panfrost_device *pfdev, u32 as_nr)
+ 	/* Wait for the MMU status to indicate there is no active command, in
+ 	 * case one is pending. */
+ 	ret = readl_relaxed_poll_timeout_atomic(pfdev->iomem + AS_STATUS(as_nr),
+-		val, !(val & AS_STATUS_AS_ACTIVE), 10, 100000);
++		val, !(val & AS_STATUS_AS_ACTIVE), 3, 1000);
+ 
+ 	if (ret) {
+ 		/* The GPU hung, let's trigger a reset */
+@@ -67,6 +67,8 @@ static void lock_region(struct panfrost_device *pfdev, u32 as_nr,
+ 	if (!size)
+ 		return;
+ 
++	/* TODO: Needs to merge it later */
++#if 0 /* from Linux mainline */
+ 	/*
+ 	 * The locked region is a naturally aligned power of 2 block encoded as
+ 	 * log2 minus(1).
+@@ -85,6 +87,33 @@ static void lock_region(struct panfrost_device *pfdev, u32 as_nr,
+ 	region_start &= GENMASK_ULL(63, region_width);
+ 
+ 	region = region_width | region_start;
++#else /* from Baikal-M: Panfrost patch */
++	/*
++	 * fls returns:
++	 * 1 .. 32
++	 *
++	 * 10 + fls(num_pages)
++	 * results in the range (11 .. 42)
++	 */
++
++	if (size & ~PAGE_MASK)
++		size = (size >> PAGE_SHIFT) + 1;
++	else
++		size = size >> PAGE_SHIFT;
++	region_width = 10;
++	if (size > 0x80000000) {
++		if (size & 0xffffffff)
++			size = (size >> 32) + 1;
++		else
++			size = size >> 32;
++		region_width += 32;
++	}
++	region_width += fls(size);
++	if (size != (1ul << ((region_width - 11) & 0x1f)))
++		region_width++;
++
++	region = region_width | (region_start & PAGE_MASK);
++#endif
+ 
+ 	/* Lock the region that needs to be updated */
+ 	mmu_write(pfdev, AS_LOCKADDR_LO(as_nr), lower_32_bits(region));
+@@ -128,7 +157,13 @@ static void panfrost_mmu_enable(struct panfrost_device *pfdev, struct panfrost_m
+ 	u64 transtab = cfg->arm_mali_lpae_cfg.transtab;
+ 	u64 memattr = cfg->arm_mali_lpae_cfg.memattr;
+ 
++
++	/* TODO: Needs to merge it later */
++#if 0 /* from Linux mainline */
+ 	mmu_hw_do_operation_locked(pfdev, as_nr, 0, ~0ULL, AS_COMMAND_FLUSH_MEM);
++#else /* from Baikal-M Panfrost patch */
++	mmu_hw_do_operation_locked(pfdev, as_nr, 0, 1ULL << 48, AS_COMMAND_FLUSH_MEM);
++#endif
+ 
+ 	mmu_write(pfdev, AS_TRANSTAB_LO(as_nr), lower_32_bits(transtab));
+ 	mmu_write(pfdev, AS_TRANSTAB_HI(as_nr), upper_32_bits(transtab));
+@@ -136,8 +171,12 @@ static void panfrost_mmu_enable(struct panfrost_device *pfdev, struct panfrost_m
+ 	/* Need to revisit mem attrs.
+ 	 * NC is the default, Mali driver is inner WT.
+ 	 */
+-	mmu_write(pfdev, AS_MEMATTR_LO(as_nr), lower_32_bits(memattr));
+-	mmu_write(pfdev, AS_MEMATTR_HI(as_nr), upper_32_bits(memattr));
++	if (panfrost_model_eq(pfdev, 0x620)) {
++		memattr &= ~0xf0f0f0ULL;
++		memattr |= 0x404040;
++	}
++        mmu_write(pfdev, AS_MEMATTR_LO(as_nr), lower_32_bits(memattr));
++        mmu_write(pfdev, AS_MEMATTR_HI(as_nr), upper_32_bits(memattr));
+ 
+ 	write_cmd(pfdev, as_nr, AS_COMMAND_UPDATE);
+ }
+@@ -212,7 +251,7 @@ u32 panfrost_mmu_as_get(struct panfrost_device *pfdev, struct panfrost_mmu *mmu)
+ 	atomic_set(&mmu->as_count, 1);
+ 	list_add(&mmu->list, &pfdev->as_lru_list);
+ 
+-	dev_dbg(pfdev->dev, "Assigned AS%d to mmu %p, alloc_mask=%lx", as, mmu, pfdev->as_alloc_mask);
++	dev_dbg(pfdev->dev, "Assigned AS%d to mmu %px, alloc_mask=%lx", as, mmu, pfdev->as_alloc_mask);
+ 
+ 	panfrost_mmu_enable(pfdev, mmu);
+ 
+@@ -314,6 +353,8 @@ int panfrost_mmu_map(struct panfrost_gem_mapping *mapping)
+ 
+ 	if (bo->noexec)
+ 		prot |= IOMMU_NOEXEC;
++	if (bo->is_heap)
++		prot |= IOMMU_CACHE;
+ 
+ 	sgt = drm_gem_shmem_get_pages_sgt(obj);
+ 	if (WARN_ON(IS_ERR(sgt)))

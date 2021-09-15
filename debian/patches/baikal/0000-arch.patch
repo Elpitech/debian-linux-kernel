@@ -1,0 +1,77 @@
+diff --git a/arch/arm64/Kconfig.platforms b/arch/arm64/Kconfig.platforms
+index 54e3910e8b9..16e0867d5ab 100644
+--- a/arch/arm64/Kconfig.platforms
++++ b/arch/arm64/Kconfig.platforms
+@@ -34,6 +34,16 @@ config ARCH_APPLE
+ 	  This enables support for Apple's in-house ARM SoC family, starting
+ 	  with the Apple M1.
+ 
++config ARCH_BAIKAL
++	bool "Baikal Electronics Baikal-M SoC Family"
++	select GPIOLIB
++	select PINCTRL
++	select OF_GPIO
++	select DW_APB_TIMER
++	select DW_APB_TIMER_OF
++	help
++	  This enables support for Baikal Electronics Baikal-M SoC Family
++
+ config ARCH_BCM2835
+ 	bool "Broadcom BCM2835 family"
+ 	select TIMER_OF
+@@ -316,6 +326,24 @@ config ARCH_XGENE
+ 	help
+ 	  This enables support for AppliedMicro X-Gene SOC Family
+ 
++config ARCH_ZX
++	bool "ZTE ZX SoC Family"
++	select PINCTRL
++	help
++	  This enables support for ZTE ZX SoC Family
++
++# The GPIO number here must be sorted by descending number.
++# In a case of multiplatform kernel we want the highest value
++# required by selected platforms
++config ARCH_NR_GPIO
++	int
++	default 64 if ARCH_BAIKAL
++	default 0
++	help
++	  Maximum number of GPIOs in the system.
++
++	  If unsure, leave the default value.
++
+ config ARCH_ZYNQMP
+ 	bool "Xilinx ZynqMP Family"
+ 	help
+diff --git a/drivers/firmware/efi/arm-runtime.c b/drivers/firmware/efi/arm-runtime.c
+index 3359ae2adf2..5028cd1605f 100644
+--- a/drivers/firmware/efi/arm-runtime.c
++++ b/drivers/firmware/efi/arm-runtime.c
+@@ -71,6 +71,9 @@ static bool __init efi_virtmap_init(void)
+ 			pr_warn("  EFI remap %pa: failed to create mapping (%d)\n",
+ 				&phys, ret);
+ 			return false;
++		} else {
++			pr_info("  EFI remap %pa => %llx\n",
++				&phys, (unsigned long long)md->virt_addr);
+ 		}
+ 	}
+ 
+diff --git a/tools/build/Makefile.include b/tools/build/Makefile.include
+index 8dadaa0fbb4..fa9a2ff4b40 100644
+--- a/tools/build/Makefile.include
++++ b/tools/build/Makefile.include
+@@ -1,8 +1,12 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ build := -f $(srctree)/tools/build/Makefile.build dir=. obj
+ 
++ifdef CROSS_COMPILE
++fixdep:
++else
+ fixdep:
+ 	$(Q)$(MAKE) -C $(srctree)/tools/build CFLAGS= LDFLAGS= $(OUTPUT)fixdep
++endif
+ 
+ fixdep-clean:
+ 	$(Q)$(MAKE) -C $(srctree)/tools/build clean

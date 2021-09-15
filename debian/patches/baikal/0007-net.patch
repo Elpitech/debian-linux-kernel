@@ -1,0 +1,2427 @@
+diff --git a/drivers/net/ethernet/amd/Kconfig b/drivers/net/ethernet/amd/Kconfig
+index 899c8a2a34b..21db629cb23 100644
+--- a/drivers/net/ethernet/amd/Kconfig
++++ b/drivers/net/ethernet/amd/Kconfig
+@@ -196,4 +196,11 @@ config AMD_XGBE_HAVE_ECC
+ 	bool
+ 	default n
+ 
++config BAIKAL_XGBE
++	bool "Baikal XGBE support"
++	default n
++	depends on AMD_XGBE
++	help
++	  Say Y to enable Baikal XGBE support
++
+ endif # NET_VENDOR_AMD
+diff --git a/drivers/net/ethernet/amd/xgbe/Makefile b/drivers/net/ethernet/amd/xgbe/Makefile
+index 620785ffbd5..24e21b66dd1 100644
+--- a/drivers/net/ethernet/amd/xgbe/Makefile
++++ b/drivers/net/ethernet/amd/xgbe/Makefile
+@@ -7,6 +7,7 @@ amd-xgbe-objs := xgbe-main.o xgbe-drv.o xgbe-dev.o \
+ 		 xgbe-i2c.o xgbe-phy-v1.o xgbe-phy-v2.o \
+ 		 xgbe-platform.o
+ 
++amd-xgbe-$(CONFIG_BAIKAL_XGBE) += baikal-mdio.o
+ amd-xgbe-$(CONFIG_PCI) += xgbe-pci.o
+ amd-xgbe-$(CONFIG_AMD_XGBE_DCB) += xgbe-dcb.o
+ amd-xgbe-$(CONFIG_DEBUG_FS) += xgbe-debugfs.o
+diff --git a/drivers/net/ethernet/amd/xgbe/baikal-mdio.c b/drivers/net/ethernet/amd/xgbe/baikal-mdio.c
+new file mode 100644
+index 00000000000..e671e247423
+--- /dev/null
++++ b/drivers/net/ethernet/amd/xgbe/baikal-mdio.c
+@@ -0,0 +1,635 @@
++/*
++ *
++ * This file is available to you under your choice of the following two
++ * licenses:
++ *
++ * License 1: GPLv2
++ *
++ * Copyright (c) 2014 Advanced Micro Devices, Inc.
++ *
++ * This file is free software; you may copy, redistribute and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 2 of the License, or (at
++ * your option) any later version.
++ *
++ * This file is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ *
++ * This file incorporates work covered by the following copyright and
++ * permission notice:
++ *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
++ *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
++ *     Inc. unless otherwise expressly agreed to in writing between Synopsys
++ *     and you.
++ *
++ *     The Software IS NOT an item of Licensed Software or Licensed Product
++ *     under any End User Software License Agreement or Agreement for Licensed
++ *     Product with Synopsys or any supplement thereto.  Permission is hereby
++ *     granted, free of charge, to any person obtaining a copy of this software
++ *     annotated with this license and the Software, to deal in the Software
++ *     without restriction, including without limitation the rights to use,
++ *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
++ *     of the Software, and to permit persons to whom the Software is furnished
++ *     to do so, subject to the following conditions:
++ *
++ *     The above copyright notice and this permission notice shall be included
++ *     in all copies or substantial portions of the Software.
++ *
++ *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
++ *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
++ *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
++ *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
++ *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ *     THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ *
++ * License 2: Modified BSD
++ *
++ * Copyright (c) 2014 Advanced Micro Devices, Inc.
++ * All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *     * Redistributions of source code must retain the above copyright
++ *       notice, this list of conditions and the following disclaimer.
++ *     * Redistributions in binary form must reproduce the above copyright
++ *       notice, this list of conditions and the following disclaimer in the
++ *       documentation and/or other materials provided with the distribution.
++ *     * Neither the name of Advanced Micro Devices, Inc. nor the
++ *       names of its contributors may be used to endorse or promote products
++ *       derived from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
++ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
++ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
++ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
++ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
++ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * This file incorporates work covered by the following copyright and
++ * permission notice:
++ *     The Synopsys DWC ETHER XGMAC Software Driver and documentation
++ *     (hereinafter "Software") is an unsupported proprietary work of Synopsys,
++ *     Inc. unless otherwise expressly agreed to in writing between Synopsys
++ *     and you.
++ *
++ *     The Software IS NOT an item of Licensed Software or Licensed Product
++ *     under any End User Software License Agreement or Agreement for Licensed
++ *     Product with Synopsys or any supplement thereto.  Permission is hereby
++ *     granted, free of charge, to any person obtaining a copy of this software
++ *     annotated with this license and the Software, to deal in the Software
++ *     without restriction, including without limitation the rights to use,
++ *     copy, modify, merge, publish, distribute, sublicense, and/or sell copies
++ *     of the Software, and to permit persons to whom the Software is furnished
++ *     to do so, subject to the following conditions:
++ *
++ *     The above copyright notice and this permission notice shall be included
++ *     in all copies or substantial portions of the Software.
++ *
++ *     THIS SOFTWARE IS BEING DISTRIBUTED BY SYNOPSYS SOLELY ON AN "AS IS"
++ *     BASIS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
++ *     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
++ *     PARTICULAR PURPOSE ARE HEREBY DISCLAIMED. IN NO EVENT SHALL SYNOPSYS
++ *     BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++ *     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++ *     SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
++ *     INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
++ *     CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
++ *     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
++ *     THE POSSIBILITY OF SUCH DAMAGE.
++ */
++
++#include <linux/module.h>
++#include <linux/kmod.h>
++#include <linux/mdio.h>
++#include <linux/phy.h>
++#include <linux/of.h>
++#include <linux/of_platform.h>
++#include <linux/of_device.h>
++#include <linux/of_mdio.h>
++#include <linux/bitops.h>
++#include <linux/jiffies.h>
++#include <linux/clk.h>
++
++#include "xgbe.h"
++#include "xgbe-common.h"
++
++#ifndef VR_XS_PMA_MII_Gen5_MPLL_CTRL
++#define VR_XS_PMA_MII_Gen5_MPLL_CTRL                    0x807A
++#endif
++#define VR_XS_PMA_MII_Gen5_MPLL_CTRL_REF_CLK_SEL_bit    (1 << 13)
++#define VR_XS_PCS_DIG_CTRL1                             0x8000
++#define VR_XS_PCS_DIG_CTRL1_VR_RST_Bit                  MDIO_CTRL1_RESET
++#define SR_XC_or_PCS_MMD_Control1                       MDIO_CTRL1
++#define SR_XC_or_PCS_MMD_Control1_RST_Bit               MDIO_CTRL1_RESET
++#define DWC_GLBL_PLL_MONITOR                            0x8010
++#define SDS_PCS_CLOCK_READY_mask                        0x1C
++#define SDS_PCS_CLOCK_READY_bit                         0x10
++#define VR_XS_PMA_MII_ENT_GEN5_GEN_CTL                  0x809C
++#define VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LANE_MODE_KX4    (4 << 0)
++#define VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LANE_MODE_MASK   0x0007
++#define VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LINK_WIDTH_4     (2 << 8)
++#define VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LINK_WIDTH_MASK  0x0700
++#define VR_XS_OR_PCS_MMD_DIGITAL_CTL1_VR_RST            (1 << 15)
++
++#define DELAY_COUNT     50
++
++static int be_xgbe_an_restart_kr_training(struct xgbe_prv_data *pdata)
++{
++	int reg = 0;
++
++	DBGPR("%s\n", __FUNCTION__);
++
++	/* Restart training */
++	XMDIO_WRITE(pdata, MDIO_MMD_PMAPMD, 0x0096, 3);
++	msleep(500);
++	XMDIO_WRITE(pdata, MDIO_MMD_PMAPMD, 0x0096, 1);
++	
++	/* The worse case when training continue till 500ms */
++	msleep(500);
++
++	reg = XMDIO_READ(pdata, MDIO_MMD_PMAPMD, 0x0097);
++	/* Check training failure */
++	if (reg & (1 << 3))
++		return -1;
++
++	/* Success */
++	return 0;
++}
++
++static int be_xgbe_an_enable_kr_training(struct xgbe_prv_data *pdata)
++{
++	DBGPR("%s\n", __FUNCTION__);
++	
++	/* Enable training */
++	XMDIO_WRITE(pdata, MDIO_MMD_PMAPMD, 0x0096, 2);
++	
++	return 0;
++}
++
++static int be_xgbe_phy_pcs_power_cycle(struct xgbe_prv_data *pdata)
++{
++	int ret;
++	DBGPR("%s\n", __FUNCTION__);
++
++	ret = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL1);
++
++	ret |= MDIO_CTRL1_LPOWER;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL1, ret);
++
++	usleep_range(75, 100);
++
++	ret &= ~MDIO_CTRL1_LPOWER;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL1, ret);
++
++	return 0;
++}
++
++static int be_xgbe_phy_xgmii_mode_kx4(struct xgbe_prv_data *pdata)
++{
++	int  ret, count;
++
++	DBGPR_MDIO("%s\n", __FUNCTION__);
++
++	/* Write 2'b01 to Bits[1:0] of SR PCS Control2 to set the xpcx_kr_0
++	 * output to 0.
++	 */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL2);
++
++	ret &= ~MDIO_PCS_CTRL2_TYPE;
++	ret |= MDIO_PCS_CTRL2_10GBX;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL2, ret);
++
++	/* Set Bit 13 SR PMA MMD Control1 Register (for back plane) to 1. */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PMAPMD, MDIO_CTRL1);
++
++	ret |= 0x2000;
++	XMDIO_WRITE(pdata, MDIO_MMD_PMAPMD, MDIO_CTRL1, ret);
++
++	/* Set LANE_MODE TO KX4 (4). */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PMAPMD, VR_XS_PMA_MII_ENT_GEN5_GEN_CTL);
++
++	ret &= ~VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LANE_MODE_MASK;
++	ret |= VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LANE_MODE_KX4;
++	XMDIO_WRITE(pdata, MDIO_MMD_PMAPMD, VR_XS_PMA_MII_ENT_GEN5_GEN_CTL, ret);
++
++	/* Set LANE_WIDTH (2) 4 lanes per link. */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PMAPMD, VR_XS_PMA_MII_ENT_GEN5_GEN_CTL);
++
++	ret &= ~VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LINK_WIDTH_MASK;
++	ret |= VR_XS_PMA_MII_ENT_GEN5_GEN_CTL_LINK_WIDTH_4;
++	XMDIO_WRITE(pdata, MDIO_MMD_PMAPMD, VR_XS_PMA_MII_ENT_GEN5_GEN_CTL, ret);
++
++	/* Initiate Software Reset. */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PCS, VR_XS_PCS_DIG_CTRL1);
++
++	ret |= VR_XS_OR_PCS_MMD_DIGITAL_CTL1_VR_RST;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, VR_XS_PCS_DIG_CTRL1, ret);
++
++	/* Wait until reset done. */
++	count = DELAY_COUNT;
++	do {
++		msleep(20);
++		ret = XMDIO_READ(pdata, MDIO_MMD_PCS, VR_XS_PCS_DIG_CTRL1);
++	} while (!!(ret & VR_XS_OR_PCS_MMD_DIGITAL_CTL1_VR_RST) && --count);
++
++	if (ret & VR_XS_OR_PCS_MMD_DIGITAL_CTL1_VR_RST)
++		return -ETIMEDOUT;
++
++	return 0;
++}
++
++static int be_xgbe_phy_xgmii_mode_kr(struct xgbe_prv_data *pdata)
++{
++	int ret;
++	DBGPR("%s\n", __FUNCTION__);
++	
++	/* Enable KR training */
++	ret = be_xgbe_an_enable_kr_training(pdata);
++	if (ret < 0)
++		return ret;
++
++	/* Set PCS to KR/10G speed */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL2);
++
++	ret &= ~MDIO_PCS_CTRL2_TYPE;
++	ret |= MDIO_PCS_CTRL2_10GBR;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL2, ret);
++
++	ret = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL1);
++
++	ret &= ~MDIO_CTRL1_SPEEDSEL;
++	ret |= MDIO_CTRL1_SPEED10G;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL1, ret);
++
++	ret = be_xgbe_phy_pcs_power_cycle(pdata);
++	if (ret < 0)
++    		return ret;
++
++	return 0;
++}
++
++static int be_xgbe_phy_xgmii_mode(struct xgbe_prv_data *pdata)
++{
++    struct device *dev = pdata->dev;
++    char mode[32];
++    const char *pm = mode;
++
++    if(!of_property_read_string(dev->of_node, "be,pcs-mode", &pm)) {
++        if(strcasecmp(pm, "KX4") == 0){
++            DBGPR("xgbe: mode KX4 = 0x%X function: %s\n", mode, __FUNCTION__);
++            return be_xgbe_phy_xgmii_mode_kx4(pdata);
++        }
++    }
++
++    DBGPR("xgbe: mode KR = 0x%X function: %s\n", mode, __FUNCTION__);
++
++    return be_xgbe_phy_xgmii_mode_kr(pdata);
++}
++
++static int __maybe_unused be_xgbe_phy_soft_reset(struct xgbe_prv_data *pdata)
++{
++	int count, ret;
++	DBGPR("%s\n", __FUNCTION__);
++
++	ret = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL1);
++
++	ret |= MDIO_CTRL1_RESET;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, MDIO_CTRL1, ret);
++
++	count = DELAY_COUNT;
++	do {
++		msleep(20);
++		ret = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_CTRL1);
++		if (ret < 0)
++			return ret;
++	} while ((ret & MDIO_CTRL1_RESET) && --count);
++
++	if (ret & MDIO_CTRL1_RESET)
++		return -ETIMEDOUT;
++
++	return 0;
++}
++
++static int be_xgbe_phy_config_aneg(struct xgbe_prv_data *pdata)
++{
++	int reg;
++
++	DBGPR("%s\n", __FUNCTION__);
++
++	pdata->link_check = jiffies;
++	reg = XMDIO_READ(pdata, MDIO_MMD_AN, MDIO_CTRL1);
++	
++	/* Disable auto negotiation in any case! */
++	reg &= ~MDIO_AN_CTRL1_ENABLE;
++	pdata->phy.autoneg = AUTONEG_DISABLE;
++
++	XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_CTRL1, reg);
++
++	return 0;
++}
++
++static int ext_phy_probe(struct device *pdev, struct phy_device **phy_dev)
++{
++        struct device_node *xmit_node;
++        struct phy_device *phydev;
++        struct device *dev = pdev;
++        int ret;
++
++        /* Retrieve the xmit-handle */
++        xmit_node = of_parse_phandle(dev->of_node, "ext-phy-handle", 0);
++        if (!xmit_node)
++                return -ENODEV;
++
++        phydev = of_phy_find_device(xmit_node);
++        if (!phydev)
++                return -ENODEV;
++
++        ret = phy_init_hw(phydev);
++        if (ret < 0)
++                return ret;
++
++        if ((phydev->speed != SPEED_10000) && (phydev->duplex != DUPLEX_FULL))
++        	return -ENODEV;
++
++        *phy_dev = phydev;
++
++        return 0;
++}
++
++int be_xgbe_phy_config_init(struct xgbe_prv_data *pdata)
++{
++	int ret = 0;
++    	int count = DELAY_COUNT;
++	DBGPR("%s\n", __FUNCTION__);
++
++        if(ext_phy_probe(&pdata->platdev->dev, &pdata->phydev)) {
++                pr_info("XGMAC: can't probe external PHY\n");
++                return 1;
++        }
++
++        pr_info("XGMAC: probe external PHY with success\n");
++
++	/* Initialize supported features */
++	linkmode_mod_bit(ETHTOOL_LINK_MODE_10000baseT_Full_BIT,
++			pdata->phydev->supported, 1);
++	linkmode_mod_bit(ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT,
++			pdata->phydev->supported, 1);
++	linkmode_mod_bit(ETHTOOL_LINK_MODE_10000baseKR_Full_BIT,
++			pdata->phydev->supported, 1);
++	linkmode_mod_bit(ETHTOOL_LINK_MODE_Backplane_BIT,
++			pdata->phydev->supported, 1);
++	linkmode_mod_bit(ETHTOOL_LINK_MODE_Autoneg_BIT,
++			pdata->phydev->supported, 1);
++	linkmode_mod_bit(ETHTOOL_LINK_MODE_Asym_Pause_BIT,
++			pdata->phydev->supported, 1);
++	linkmode_mod_bit(ETHTOOL_LINK_MODE_Pause_BIT,
++			pdata->phydev->supported, 1);
++	linkmode_copy(pdata->phydev->advertising, pdata->phydev->supported);
++
++	pdata->phy.pause_autoneg = 0;
++	pdata->phy.tx_pause = 0;
++	pdata->phy.rx_pause = 0;
++	
++        /* Switch XGMAC PHY PLL to use external ref clock from pad */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PMAPMD, VR_XS_PMA_MII_Gen5_MPLL_CTRL);
++	ret &= ~(VR_XS_PMA_MII_Gen5_MPLL_CTRL_REF_CLK_SEL_bit);
++	XMDIO_WRITE(pdata, MDIO_MMD_PMAPMD, VR_XS_PMA_MII_Gen5_MPLL_CTRL, ret);
++	wmb();
++
++	/* Make vendor specific soft reset */
++	ret = XMDIO_READ(pdata, MDIO_MMD_PCS, VR_XS_PCS_DIG_CTRL1);
++	ret |= VR_XS_PCS_DIG_CTRL1_VR_RST_Bit;
++	XMDIO_WRITE(pdata, MDIO_MMD_PCS, VR_XS_PCS_DIG_CTRL1, ret);
++	wmb();
++
++	/* Wait reset finish */
++	count = DELAY_COUNT;
++	do {
++		usleep_range(500, 600);
++		ret = XMDIO_READ(pdata, MDIO_MMD_PCS, VR_XS_PCS_DIG_CTRL1);
++	} while(((ret & VR_XS_PCS_DIG_CTRL1_VR_RST_Bit) != 0) && count--);
++
++
++	DBGPR("%s %x\n", __FUNCTION__, ret);
++	/*
++	 * Wait for the RST (bit 15) of the “SR XS or PCS MMD Control1” Register is 0.
++	 * This bit is self-cleared when Bits[4:2] in VR XS or PCS MMD Digital
++	 * Status Register are equal to 3’b100, that is, Tx/Rx clocks are stable
++	 * and in Power_Good state.
++	 */
++	count = DELAY_COUNT;
++	do {
++		usleep_range(500, 600);
++		ret = XMDIO_READ(pdata, MDIO_MMD_PCS, SR_XC_or_PCS_MMD_Control1);
++	} while(((ret & SR_XC_or_PCS_MMD_Control1_RST_Bit) != 0) && count--);
++
++	/*
++	 * This bit is self-cleared when Bits[4:2] in VR XS or PCS MMD Digital
++	 * Status Register are equal to 3’b100, that is, Tx/Rx clocks are stable
++	 * and in Power_Good state.
++	 */
++	count = DELAY_COUNT;
++	do {
++		usleep_range(500, 600);
++		ret = XMDIO_READ(pdata, MDIO_MMD_PCS, DWC_GLBL_PLL_MONITOR);
++	} while(((ret & SDS_PCS_CLOCK_READY_mask) != SDS_PCS_CLOCK_READY_bit) && count-- );
++
++	/* Turn off and clear interrupts */
++	XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INTMASK, 0);
++	XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INT, 0);
++	wmb();
++
++	be_xgbe_phy_config_aneg(pdata);
++
++	ret = be_xgbe_phy_xgmii_mode(pdata);
++    
++	count = DELAY_COUNT;
++	do
++	{
++		msleep(10);
++		ret = XMDIO_READ(pdata, MDIO_MMD_PCS, 0x0001);
++	} while(((ret & 0x0004) != 0x0004) && count--);
++
++	return 0;
++}
++
++static int be_xgbe_phy_aneg_done(struct xgbe_prv_data *pdata)
++{
++	int reg;
++	DBGPR("%s\n", __FUNCTION__);
++
++	reg = XMDIO_READ(pdata, MDIO_MMD_AN, MDIO_STAT1);
++
++	return (reg & MDIO_AN_STAT1_COMPLETE) ? 1 : 0;
++}
++
++static int be_xgbe_phy_update_link(struct xgbe_prv_data *pdata)
++{
++	int new_state = 0;
++	int ret = 0;
++	struct phy_device *phydev;
++
++	if(!pdata || !pdata->phydev)
++	    return 1;
++
++	phydev = pdata->phydev;
++	ret = phy_read_mmd(phydev, MDIO_MMD_PHYXS, 0x1001);
++
++	if (pdata->phy.link) {
++		/* Flow control support */
++		pdata->pause_autoneg = pdata->phy.pause_autoneg;
++
++		if (pdata->tx_pause != pdata->phy.tx_pause) {
++			new_state = 1;
++			pdata->hw_if.config_tx_flow_control(pdata);
++			pdata->tx_pause = pdata->phy.tx_pause;
++		}
++
++		if (pdata->rx_pause != pdata->phy.rx_pause) {
++			new_state = 1;
++			pdata->hw_if.config_rx_flow_control(pdata);
++			pdata->rx_pause = pdata->phy.rx_pause;
++		}
++
++		/* Speed support */
++		if (pdata->phy_speed != pdata->phy.speed) {
++			new_state = 1;
++			pdata->phy_speed = pdata->phy.speed;
++		}
++
++		if (pdata->phy_link != pdata->phy.link) {
++			new_state = 1;
++			pdata->phy_link = pdata->phy.link;
++		}
++	} else if (pdata->phy_link) {
++		new_state = 1;
++		pdata->phy_link = 0;
++		pdata->phy_speed = SPEED_UNKNOWN;
++	}
++
++	return 0;
++}
++
++static void be_xgbe_phy_read_status(struct xgbe_prv_data *pdata)
++{
++	int reg, link_aneg;
++	
++	if (!pdata->phydev)
++		return;
++
++	pdata->phy.link = 1;
++
++	if (test_bit(XGBE_LINK_ERR, &pdata->dev_state)) {
++		netif_carrier_off(pdata->netdev);
++
++		pdata->phy.link = 0;
++		goto update_link;
++	}
++
++	link_aneg = (pdata->phy.autoneg == AUTONEG_ENABLE);
++
++	if (pdata->phydev) {
++		pdata->phydev->drv->read_status(pdata->phydev);
++		/* Pop out old values */
++		pdata->phydev->drv->read_status(pdata->phydev);
++		if (!pdata->phydev->link){
++			pdata->phydev->link = 0;
++			pdata->phy.link &= pdata->phydev->link;
++		}
++	}
++	reg = XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_STAT1);
++	pdata->phy.link &= (reg & MDIO_STAT1_LSTATUS) ? 1 : 0;
++
++	reg = XMDIO_READ(pdata, MDIO_MMD_PMAPMD, MDIO_STAT1);
++	pdata->phy.link &= (reg & MDIO_STAT1_LSTATUS) ? 1 : 0;
++
++	if (pdata->phy.link) {
++		if (link_aneg && !be_xgbe_phy_aneg_done(pdata)) {
++			return;
++		}
++
++		if (test_bit(XGBE_LINK_INIT, &pdata->dev_state))
++			clear_bit(XGBE_LINK_INIT, &pdata->dev_state);
++
++		netif_carrier_on(pdata->netdev);
++	} else {
++		if (test_bit(XGBE_LINK_INIT, &pdata->dev_state)) 
++			if (link_aneg)
++				return;
++
++		netif_carrier_off(pdata->netdev);
++
++		/* If KX4 mode is enabled training doesn't affect behavior */
++		be_xgbe_an_restart_kr_training(pdata);
++		/* Pop out old values */
++		XMDIO_READ(pdata, MDIO_MMD_PCS, MDIO_STAT1);
++		XMDIO_READ(pdata, MDIO_MMD_PMAPMD, MDIO_STAT1);
++	}
++
++update_link:
++	be_xgbe_phy_update_link(pdata);
++}
++
++static void be_xgbe_phy_stop(struct xgbe_prv_data *pdata)
++{
++	netif_dbg(pdata, link, pdata->netdev, "stopping PHY\n");
++
++	/* Disable auto-negotiation interrupts */
++	XMDIO_WRITE(pdata, MDIO_MMD_AN, MDIO_AN_INTMASK, 0);
++
++	pdata->phy.link = 0;
++	netif_carrier_off(pdata->netdev);
++
++	be_xgbe_phy_update_link(pdata);
++}
++
++/**
++ * be_xgbe_phy_start() - dummy
++ */
++int be_xgbe_phy_start(struct xgbe_prv_data *pdata)
++{
++        return 0;
++}
++
++/**
++ * be_xgbe_phy_exit() - dummy
++ */
++void be_xgbe_phy_exit(struct xgbe_prv_data *pdata)
++{
++	return;
++}
++
++/**
++ * be_an_isr() - dummy
++ */
++irqreturn_t be_an_isr(struct xgbe_prv_data *pdata)
++{
++	return IRQ_HANDLED;
++}
++
++void xgbe_init_function_ptrs_phy_baikal(struct xgbe_phy_if *phy_if)
++{
++	phy_if->phy_init        = be_xgbe_phy_config_init;
++	phy_if->phy_exit	= be_xgbe_phy_exit;
++	phy_if->phy_reset       = be_xgbe_phy_soft_reset;
++	phy_if->phy_stop        = be_xgbe_phy_stop;
++	phy_if->phy_status      = be_xgbe_phy_read_status;
++	phy_if->phy_config_aneg = be_xgbe_phy_config_aneg;
++	phy_if->phy_start	= be_xgbe_phy_start;
++	phy_if->an_isr		= be_an_isr;
++}
+diff --git a/drivers/net/ethernet/amd/xgbe/xgbe-desc.c b/drivers/net/ethernet/amd/xgbe/xgbe-desc.c
+index 230726d7b74..ebd1985c361 100644
+--- a/drivers/net/ethernet/amd/xgbe/xgbe-desc.c
++++ b/drivers/net/ethernet/amd/xgbe/xgbe-desc.c
+@@ -366,8 +366,13 @@ static int xgbe_map_rx_buffer(struct xgbe_prv_data *pdata,
+ 	}
+ 
+ 	if (!ring->rx_buf_pa.pages) {
++#ifdef CONFIG_BAIKAL_XGBE
++		ret = xgbe_alloc_pages(pdata, &ring->rx_buf_pa,
++				       0, ring->node);
++#else
+ 		ret = xgbe_alloc_pages(pdata, &ring->rx_buf_pa,
+ 				       PAGE_ALLOC_COSTLY_ORDER, ring->node);
++#endif
+ 		if (ret)
+ 			return ret;
+ 	}
+diff --git a/drivers/net/ethernet/amd/xgbe/xgbe-dev.c b/drivers/net/ethernet/amd/xgbe/xgbe-dev.c
+index 3936543a74d..f1209ea3134 100644
+--- a/drivers/net/ethernet/amd/xgbe/xgbe-dev.c
++++ b/drivers/net/ethernet/amd/xgbe/xgbe-dev.c
+@@ -689,7 +689,9 @@ static void xgbe_enable_dma_interrupts(struct xgbe_prv_data *pdata)
+ 			 *          per channel interrupts in edge triggered
+ 			 *          mode)
+ 			 */
++#ifndef CONFIG_BAIKAL_XGBE
+ 			if (!pdata->per_channel_irq || pdata->channel_irq_mode)
++#endif
+ 				XGMAC_SET_BITS(channel->curr_ier,
+ 					       DMA_CH_IER, TIE, 1);
+ 		}
+@@ -701,7 +703,9 @@ static void xgbe_enable_dma_interrupts(struct xgbe_prv_data *pdata)
+ 			 *          mode)
+ 			 */
+ 			XGMAC_SET_BITS(channel->curr_ier, DMA_CH_IER, RBUE, 1);
++#ifndef CONFIG_BAIKAL_XGBE
+ 			if (!pdata->per_channel_irq || pdata->channel_irq_mode)
++#endif
+ 				XGMAC_SET_BITS(channel->curr_ier,
+ 					       DMA_CH_IER, RIE, 1);
+ 		}
+diff --git a/drivers/net/ethernet/amd/xgbe/xgbe-drv.c b/drivers/net/ethernet/amd/xgbe/xgbe-drv.c
+index 30d24d19f40..1a679212c11 100644
+--- a/drivers/net/ethernet/amd/xgbe/xgbe-drv.c
++++ b/drivers/net/ethernet/amd/xgbe/xgbe-drv.c
+@@ -216,8 +216,15 @@ static int xgbe_alloc_channels(struct xgbe_prv_data *pdata)
+ 		channel->node = node;
+ 		cpumask_set_cpu(cpu, &channel->affinity_mask);
+ 
++#ifndef CONFIG_BAIKAL_XGBE
+ 		if (pdata->per_channel_irq)
+ 			channel->dma_irq = pdata->channel_irq[i];
++#else
++		if (pdata->per_channel_irq) {
++			channel->tx_dma_irq = pdata->channel_tx_irq[i];
++			channel->rx_dma_irq = pdata->channel_rx_irq[i];
++		}
++#endif
+ 
+ 		if (i < pdata->tx_ring_count) {
+ 			ring = xgbe_alloc_node(sizeof(*ring), node);
+@@ -244,10 +251,22 @@ static int xgbe_alloc_channels(struct xgbe_prv_data *pdata)
+ 		netif_dbg(pdata, drv, pdata->netdev,
+ 			  "%s: cpu=%u, node=%d\n", channel->name, cpu, node);
+ 
++#ifndef CONFIG_BAIKAL_XGBE
+ 		netif_dbg(pdata, drv, pdata->netdev,
+ 			  "%s: dma_regs=%p, dma_irq=%d, tx=%p, rx=%p\n",
+ 			  channel->name, channel->dma_regs, channel->dma_irq,
+ 			  channel->tx_ring, channel->rx_ring);
++#else
++		netif_dbg(pdata, drv, pdata->netdev,
++			  "%s: dma_regs=%p, tx_dma_irq=%d, tx=%p, rx=%p\n",
++			  channel->name, channel->dma_regs, channel->tx_dma_irq,
++			  channel->tx_ring, channel->rx_ring);
++
++		netif_dbg(pdata, drv, pdata->netdev,
++			  "%s: dma_regs=%p, rx_dma_irq=%d, tx=%p, rx=%p\n",
++			  channel->name, channel->dma_regs, channel->rx_dma_irq,
++			  channel->tx_ring, channel->rx_ring);
++#endif
+ 	}
+ 
+ 	pdata->channel_count = count;
+@@ -623,10 +642,16 @@ static irqreturn_t xgbe_dma_isr(int irq, void *data)
+ 	 */
+ 	if (napi_schedule_prep(&channel->napi)) {
+ 		/* Disable Tx and Rx interrupts */
++#ifndef CONFIG_BAIKAL_XGBE
+ 		if (pdata->channel_irq_mode)
+ 			xgbe_disable_rx_tx_int(pdata, channel);
+ 		else
+ 			disable_irq_nosync(channel->dma_irq);
++#else
++		xgbe_disable_rx_tx_int(pdata, channel);
++		disable_irq_nosync(channel->tx_dma_irq);
++		disable_irq_nosync(channel->rx_dma_irq);
++#endif
+ 
+ 		/* Turn on polling */
+ 		__napi_schedule_irqoff(&channel->napi);
+@@ -654,10 +679,17 @@ static void xgbe_tx_timer(struct timer_list *t)
+ 	if (napi_schedule_prep(napi)) {
+ 		/* Disable Tx and Rx interrupts */
+ 		if (pdata->per_channel_irq)
++#ifndef CONFIG_BAIKAL_XGBE
+ 			if (pdata->channel_irq_mode)
+ 				xgbe_disable_rx_tx_int(pdata, channel);
+ 			else
+ 				disable_irq_nosync(channel->dma_irq);
++#else
++		{
++				disable_irq_nosync(channel->tx_dma_irq);
++				disable_irq_nosync(channel->rx_dma_irq);
++		}
++#endif
+ 		else
+ 			xgbe_disable_rx_tx_ints(pdata);
+ 
+@@ -1015,6 +1047,7 @@ static int xgbe_request_irqs(struct xgbe_prv_data *pdata)
+ 	if (!pdata->per_channel_irq)
+ 		return 0;
+ 
++#ifndef CONFIG_BAIKAL_XGBE
+ 	for (i = 0; i < pdata->channel_count; i++) {
+ 		channel = pdata->channel[i];
+ 		snprintf(channel->dma_irq_name,
+@@ -1035,6 +1068,61 @@ static int xgbe_request_irqs(struct xgbe_prv_data *pdata)
+ 				      &channel->affinity_mask);
+ 	}
+ 
++	err_dma_irq:
++		/* Using an unsigned int, 'i' will go to UINT_MAX and exit */
++		for (i--; i < pdata->channel_count; i--) {
++			channel = pdata->channel[i];
++
++			irq_set_affinity_hint(channel->dma_irq, NULL);
++			devm_free_irq(pdata->dev, channel->dma_irq, channel);
++		}
++
++		if (pdata->vdata->ecc_support && (pdata->dev_irq != pdata->ecc_irq))
++			devm_free_irq(pdata->dev, pdata->ecc_irq, pdata);
++
++	err_dev_irq:
++		devm_free_irq(pdata->dev, pdata->dev_irq, pdata);
++
++		return ret;
++#else
++	for (i = 0; i < pdata->channel_count; i++) {
++		channel = pdata->channel[i];
++		/* Tx */
++		snprintf(channel->tx_dma_irq_name,
++			 sizeof(channel->tx_dma_irq_name) - 1,
++			 "%s-Tx-%u", netdev_name(netdev),
++			 channel->queue_index);
++
++		ret = devm_request_irq(pdata->dev, channel->tx_dma_irq,
++				       xgbe_dma_isr, 0,
++				       channel->tx_dma_irq_name, channel);
++		if (ret) {
++			netdev_alert(netdev, "error requesting irq %d\n",
++				     channel->tx_dma_irq);
++			goto err_dma_irq;
++		}
++
++		irq_set_affinity_hint(channel->tx_dma_irq,
++						      &channel->affinity_mask);
++
++		/* Rx */
++		snprintf(channel->rx_dma_irq_name,
++			 sizeof(channel->rx_dma_irq_name) - 1,
++			 "%s-Rx-%u", netdev_name(netdev),
++			 channel->queue_index);
++
++		ret = devm_request_irq(pdata->dev, channel->rx_dma_irq,
++				       xgbe_dma_isr, 0,
++				       channel->rx_dma_irq_name, channel);
++		if (ret) {
++			netdev_alert(netdev, "error requesting irq %d\n",
++				     channel->rx_dma_irq);
++			goto err_dma_irq;
++		}
++
++		irq_set_affinity_hint(channel->rx_dma_irq,
++						      &channel->affinity_mask);
++	}
+ 	return 0;
+ 
+ err_dma_irq:
+@@ -1042,8 +1130,10 @@ err_dma_irq:
+ 	for (i--; i < pdata->channel_count; i--) {
+ 		channel = pdata->channel[i];
+ 
+-		irq_set_affinity_hint(channel->dma_irq, NULL);
+-		devm_free_irq(pdata->dev, channel->dma_irq, channel);
++		devm_free_irq(pdata->dev, channel->tx_dma_irq, channel);
++		devm_free_irq(pdata->dev, channel->rx_dma_irq, channel);
++		irq_set_affinity_hint(channel->tx_dma_irq, NULL);
++		irq_set_affinity_hint(channel->rx_dma_irq, NULL);
+ 	}
+ 
+ 	if (pdata->vdata->ecc_support && (pdata->dev_irq != pdata->ecc_irq))
+@@ -1053,6 +1143,7 @@ err_dev_irq:
+ 	devm_free_irq(pdata->dev, pdata->dev_irq, pdata);
+ 
+ 	return ret;
++#endif
+ }
+ 
+ static void xgbe_free_irqs(struct xgbe_prv_data *pdata)
+@@ -1071,8 +1162,15 @@ static void xgbe_free_irqs(struct xgbe_prv_data *pdata)
+ 	for (i = 0; i < pdata->channel_count; i++) {
+ 		channel = pdata->channel[i];
+ 
++#ifndef CONFIG_BAIKAL_XGBE
+ 		irq_set_affinity_hint(channel->dma_irq, NULL);
+ 		devm_free_irq(pdata->dev, channel->dma_irq, channel);
++#else
++		irq_set_affinity_hint(channel->tx_dma_irq, NULL);
++		irq_set_affinity_hint(channel->rx_dma_irq, NULL);
++		devm_free_irq(pdata->dev, channel->tx_dma_irq, channel);
++		devm_free_irq(pdata->dev, channel->rx_dma_irq, channel);
++#endif
+ 	}
+ }
+ 
+@@ -1153,10 +1251,14 @@ static void xgbe_free_rx_data(struct xgbe_prv_data *pdata)
+ 
+ static int xgbe_phy_reset(struct xgbe_prv_data *pdata)
+ {
++#ifndef CONFIG_BAIKAL_XGBE
+ 	pdata->phy_link = -1;
+ 	pdata->phy_speed = SPEED_UNKNOWN;
+ 
+ 	return pdata->phy_if.phy_reset(pdata);
++#else
++	return 0;
++#endif
+ }
+ 
+ int xgbe_powerdown(struct net_device *netdev, unsigned int caller)
+@@ -2146,7 +2248,12 @@ static void xgbe_poll_controller(struct net_device *netdev)
+ 	if (pdata->per_channel_irq) {
+ 		for (i = 0; i < pdata->channel_count; i++) {
+ 			channel = pdata->channel[i];
++#ifndef CONFIG_BAIKAL_XGBE
+ 			xgbe_dma_isr(channel->dma_irq, channel);
++#else
++			xgbe_dma_isr(channel->tx_dma_irq, channel);
++			xgbe_dma_isr(channel->rx_dma_irq, channel);
++#endif
+ 		}
+ 	} else {
+ 		disable_irq(pdata->dev_irq);
+@@ -2677,10 +2784,16 @@ static int xgbe_one_poll(struct napi_struct *napi, int budget)
+ 	/* If we processed everything, we are done */
+ 	if ((processed < budget) && napi_complete_done(napi, processed)) {
+ 		/* Enable Tx and Rx interrupts */
++#ifndef CONFIG_BAIKAL_XGBE
+ 		if (pdata->channel_irq_mode)
+ 			xgbe_enable_rx_tx_int(pdata, channel);
+ 		else
+ 			enable_irq(channel->dma_irq);
++#else
++		xgbe_enable_rx_tx_int(pdata, channel);
++		enable_irq(channel->tx_dma_irq);
++		enable_irq(channel->rx_dma_irq);
++#endif
+ 	}
+ 
+ 	DBGPR("<--xgbe_one_poll: received = %d\n", processed);
+diff --git a/drivers/net/ethernet/amd/xgbe/xgbe-main.c b/drivers/net/ethernet/amd/xgbe/xgbe-main.c
+index 0e8698928e4..c2ac0a93de0 100644
+--- a/drivers/net/ethernet/amd/xgbe/xgbe-main.c
++++ b/drivers/net/ethernet/amd/xgbe/xgbe-main.c
+@@ -121,6 +121,9 @@
+ #include <linux/etherdevice.h>
+ #include <linux/io.h>
+ #include <linux/notifier.h>
++#ifdef CONFIG_BAIKAL_XGBE
++#include <linux/clk.h>
++#endif
+ 
+ #include "xgbe.h"
+ #include "xgbe-common.h"
+@@ -141,7 +144,11 @@ static void xgbe_default_config(struct xgbe_prv_data *pdata)
+ 	DBGPR("-->xgbe_default_config\n");
+ 
+ 	pdata->blen = DMA_SBMR_BLEN_64;
+-	pdata->pbl = DMA_PBL_128;
++#ifdef CONFIG_BAIKAL_XGBE
++	pdata->pbl = DMA_PBL_16;
++#else
++	pdata->pbl = DMA_PBL_256;
++#endif
+ 	pdata->aal = 1;
+ 	pdata->rd_osr_limit = 8;
+ 	pdata->wr_osr_limit = 8;
+@@ -328,6 +335,19 @@ int xgbe_config_netdev(struct xgbe_prv_data *pdata)
+ 	XGMAC_SET_BITS(pdata->rss_options, MAC_RSSCR, TCP4TE, 1);
+ 	XGMAC_SET_BITS(pdata->rss_options, MAC_RSSCR, UDP4TE, 1);
+ 
++#ifdef CONFIG_BAIKAL_XGBE
++	ret = clk_prepare_enable(pdata->sysclk);
++	if (ret) {
++		netdev_alert(netdev, "gmac clk_prepare_enable failed\n");
++		return ret;
++	}
++
++	ret = clk_prepare_enable(pdata->ptpclk);
++	if (ret) {
++		netdev_alert(netdev, "dma clk_prepare_enable failed\n");
++		return ret;
++	}
++#endif
+ 	/* Call MDIO/PHY initialization routine */
+ 	pdata->debugfs_an_cdr_workaround = pdata->vdata->an_cdr_workaround;
+ 	ret = pdata->phy_if.phy_init(pdata);
+diff --git a/drivers/net/ethernet/amd/xgbe/xgbe-platform.c b/drivers/net/ethernet/amd/xgbe/xgbe-platform.c
+index 4ebd2410185..f3d50ad3568 100644
+--- a/drivers/net/ethernet/amd/xgbe/xgbe-platform.c
++++ b/drivers/net/ethernet/amd/xgbe/xgbe-platform.c
+@@ -370,6 +370,7 @@ static int xgbe_platform_probe(struct platform_device *pdev)
+ 	if (netif_msg_probe(pdata))
+ 		dev_dbg(dev, "xpcs_regs  = %p\n", pdata->xpcs_regs);
+ 
++#ifndef CONFIG_BAIKAL_XGBE
+ 	pdata->rxtx_regs = devm_platform_ioremap_resource(phy_pdev,
+ 							  phy_memnum++);
+ 	if (IS_ERR(pdata->rxtx_regs)) {
+@@ -399,6 +400,7 @@ static int xgbe_platform_probe(struct platform_device *pdev)
+ 	}
+ 	if (netif_msg_probe(pdata))
+ 		dev_dbg(dev, "sir1_regs  = %p\n", pdata->sir1_regs);
++#endif
+ 
+ 	/* Retrieve the MAC address */
+ 	ret = device_property_read_u8_array(dev, XGBE_MAC_ADDR_PROPERTY,
+@@ -425,7 +427,11 @@ static int xgbe_platform_probe(struct platform_device *pdev)
+ 	/* Check for per channel interrupt support */
+ 	if (device_property_present(dev, XGBE_DMA_IRQS_PROPERTY)) {
+ 		pdata->per_channel_irq = 1;
++#ifndef CONFIG_BAIKAL_XGBE
+ 		pdata->channel_irq_mode = XGBE_IRQ_MODE_EDGE;
++#else
++		pdata->channel_irq_mode = XGBE_IRQ_MODE_LEVEL;
++#endif
+ 	}
+ 
+ 	/* Obtain device settings unique to ACPI/OF */
+@@ -467,8 +473,12 @@ static int xgbe_platform_probe(struct platform_device *pdev)
+ 	if (ret < 0)
+ 		goto err_io;
+ 	pdata->dev_irq = ret;
++#ifdef CONFIG_BAIKAL_XGBE
++	pdata->an_irq = pdata->dev_irq;
++#endif
+ 
+ 	/* Get the per channel DMA interrupts */
++#ifndef CONFIG_BAIKAL_XGBE
+ 	if (pdata->per_channel_irq) {
+ 		unsigned int i, max = ARRAY_SIZE(pdata->channel_irq);
+ 
+@@ -484,12 +494,39 @@ static int xgbe_platform_probe(struct platform_device *pdev)
+ 
+ 		pdata->irq_count += max;
+ 	}
++#else
++	if (pdata->per_channel_irq) {
++		int i;	
++		unsigned int max = ARRAY_SIZE(pdata->channel_tx_irq);
++
++		/* Tx */
++		for (i = 0; i < pdata->tx_max_channel_count; ++i) {
++			ret = platform_get_irq(pdata->platdev, i + 1);
++			if (ret < 0)
++				goto err_io;
++			pdata->channel_tx_irq[i] = ret;	
++		}
++
++		/* Rx */
++		for (i = 0; i < pdata->rx_max_channel_count; ++i) {
++			ret = platform_get_irq(pdata->platdev, i + 9);
++			if (ret < 0)
++				goto err_io;
++			pdata->channel_rx_irq[i] = ret;	
++		}	
++
++		pdata->channel_irq_count = max;
++		pdata->irq_count += max;
++	}
++#endif
+ 
++#ifndef CONFIG_BAIKAL_XGBE
+ 	/* Get the auto-negotiation interrupt */
+ 	ret = platform_get_irq(phy_pdev, phy_irqnum++);
+ 	if (ret < 0)
+ 		goto err_io;
+ 	pdata->an_irq = ret;
++#endif
+ 
+ 	/* Configure the netdev resource */
+ 	ret = xgbe_config_netdev(pdata);
+@@ -573,7 +610,11 @@ static int xgbe_platform_resume(struct device *dev)
+ #endif /* CONFIG_PM_SLEEP */
+ 
+ static const struct xgbe_version_data xgbe_v1 = {
++#ifdef CONFIG_BAIKAL_XGBE
++	.init_function_ptrs_phy_impl	= xgbe_init_function_ptrs_phy_baikal,
++#else
+ 	.init_function_ptrs_phy_impl	= xgbe_init_function_ptrs_phy_v1,
++#endif
+ 	.xpcs_access			= XGBE_XPCS_ACCESS_V1,
+ 	.tx_max_fifo_size		= 81920,
+ 	.rx_max_fifo_size		= 81920,
+diff --git a/drivers/net/ethernet/amd/xgbe/xgbe.h b/drivers/net/ethernet/amd/xgbe/xgbe.h
+index 607a2c90513..03c0747654b 100644
+--- a/drivers/net/ethernet/amd/xgbe/xgbe.h
++++ b/drivers/net/ethernet/amd/xgbe/xgbe.h
+@@ -208,6 +208,9 @@
+ #define XGBE_SPEEDSET_PROPERTY	"amd,speed-set"
+ 
+ /* Device-tree clock names */
++#ifdef CONFIG_BAIKAL_XGBE
++#define XGBE_AXI_CLOCK          "axi"
++#endif
+ #define XGBE_DMA_CLOCK		"dma_clk"
+ #define XGBE_PTP_CLOCK		"ptp_clk"
+ 
+@@ -502,8 +505,15 @@ struct xgbe_channel {
+ 	void __iomem *dma_regs;
+ 
+ 	/* Per channel interrupt irq number */
++#ifndef CONFIG_BAIKAL_XGBE
+ 	int dma_irq;
+ 	char dma_irq_name[IFNAMSIZ + 32];
++#else
++	int rx_dma_irq;
++	int tx_dma_irq;
++	char rx_dma_irq_name[IFNAMSIZ + 32];
++	char tx_dma_irq_name[IFNAMSIZ + 32];
++#endif
+ 
+ 	/* Netdev related settings */
+ 	struct napi_struct napi;
+@@ -1023,6 +1033,11 @@ struct xgbe_prv_data {
+ 	struct platform_device *phy_platdev;
+ 	struct device *phy_dev;
+ 
++#ifdef CONFIG_BAIKAL_XGBE
++	/* phydevice - tranciever */
++	struct phy_device *phydev;
++#endif
++
+ 	/* Version related data */
+ 	struct xgbe_version_data *vdata;
+ 
+@@ -1081,6 +1096,10 @@ struct xgbe_prv_data {
+ 	int ecc_irq;
+ 	int i2c_irq;
+ 	int channel_irq[XGBE_MAX_DMA_CHANNELS];
++#ifdef CONFIG_BAIKAL_XGBE
++	int channel_tx_irq[XGBE_MAX_DMA_CHANNELS];
++	int channel_rx_irq[XGBE_MAX_DMA_CHANNELS];
++#endif
+ 
+ 	unsigned int per_channel_irq;
+ 	unsigned int irq_count;
+@@ -1315,6 +1334,10 @@ const struct udp_tunnel_nic_info *xgbe_get_udp_tunnel_info(void);
+ const struct dcbnl_rtnl_ops *xgbe_get_dcbnl_ops(void);
+ #endif
+ 
++#ifdef CONFIG_BAIKAL_XGBE
++void xgbe_init_function_ptrs_phy_baikal(struct xgbe_phy_if *);
++#endif
++
+ void xgbe_ptp_register(struct xgbe_prv_data *);
+ void xgbe_ptp_unregister(struct xgbe_prv_data *);
+ void xgbe_dump_tx_desc(struct xgbe_prv_data *, struct xgbe_ring *,
+diff --git a/drivers/net/ethernet/stmicro/stmmac/Kconfig b/drivers/net/ethernet/stmicro/stmmac/Kconfig
+index 929cfc22cd0..63a298a0293 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/Kconfig
++++ b/drivers/net/ethernet/stmicro/stmmac/Kconfig
+@@ -78,6 +78,16 @@ config DWMAC_INGENIC
+ 	  device driver. This driver is used on for the Ingenic SoCs
+ 	  MAC ethernet controller.
+ 
++config DWMAC_BAIKAL
++	tristate "Baikal Electronics DWMAC support"
++	default MIPS_BAIKAL || ARCH_BAIKAL
++	depends on OF
++	help
++	  Support for Baikal Electronics DWMAC Ethernet.
++
++	  This selects the Baikal-T/M SoC glue layer support for the stmmac
++	  device driver.
++
+ config DWMAC_IPQ806X
+ 	tristate "QCA IPQ806x DWMAC support"
+ 	default ARCH_QCOM
+diff --git a/drivers/net/ethernet/stmicro/stmmac/Makefile b/drivers/net/ethernet/stmicro/stmmac/Makefile
+index d4e12e9ace4..41116f4a7ef 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/Makefile
++++ b/drivers/net/ethernet/stmicro/stmmac/Makefile
+@@ -15,6 +15,7 @@ stmmac-$(CONFIG_STMMAC_SELFTESTS) += stmmac_selftests.o
+ obj-$(CONFIG_STMMAC_PLATFORM)	+= stmmac-platform.o
+ obj-$(CONFIG_DWMAC_ANARION)	+= dwmac-anarion.o
+ obj-$(CONFIG_DWMAC_INGENIC)	+= dwmac-ingenic.o
++obj-$(CONFIG_DWMAC_BAIKAL)	+= dwmac-baikal.o
+ obj-$(CONFIG_DWMAC_IPQ806X)	+= dwmac-ipq806x.o
+ obj-$(CONFIG_DWMAC_LPC18XX)	+= dwmac-lpc18xx.o
+ obj-$(CONFIG_DWMAC_MEDIATEK)	+= dwmac-mediatek.o
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-baikal.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-baikal.c
+new file mode 100644
+index 00000000000..2826eb35210
+--- /dev/null
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-baikal.c
+@@ -0,0 +1,230 @@
++/*
++ * Baikal Electronics SoCs DWMAC glue layer
++ *
++ * Copyright (C) 2015,2016 Baikal Electronics JSC
++ * Author:
++ *   Dmitry Dunaev <dmitry.dunaev@baikalelectronics.ru>
++ * All bugs by Alexey Sheplyakov <asheplyakov@altlinux.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program. If not, see <http://www.gnu.org/licenses/>.
++ */
++
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/clk.h>
++
++#include "stmmac.h"
++#include "stmmac_platform.h"
++#include "common.h"
++#include "dwmac_dma.h"
++#include "dwmac1000_dma.h"
++
++#define MAC_GPIO	0x000000e0	/* GPIO register */
++#define MAC_GPIO_GPO0	(1 << 8)	/* 0-output port */
++
++struct baikal_dwmac {
++	struct device	*dev;
++	struct clk	*tx2_clk;
++};
++
++static void clear_phy_reset(void __iomem *ioaddr)
++{
++	u32 value;
++	value = readl(ioaddr + MAC_GPIO);
++	value |= MAC_GPIO_GPO0;
++	writel(value, ioaddr + MAC_GPIO);
++}
++
++static int baikal_dwmac_dma_reset(void __iomem *ioaddr)
++{
++	int err;
++	u32 value = readl(ioaddr + DMA_BUS_MODE);
++
++	/* DMA SW reset */
++	value |= DMA_BUS_MODE_SFT_RESET;
++	writel(value, ioaddr + DMA_BUS_MODE);
++
++	udelay(10);
++	clear_phy_reset(ioaddr);
++	pr_info("PHY re-inited for Baikal DWMAC\n");
++
++	err = readl_poll_timeout(ioaddr + DMA_BUS_MODE, value,
++				 !(value & DMA_BUS_MODE_SFT_RESET),
++				 10000, 1000000);
++	if (err)
++		return -EBUSY;
++
++	return 0;
++}
++
++static const struct stmmac_dma_ops baikal_dwmac_dma_ops = {
++	.reset = baikal_dwmac_dma_reset,
++	.init = dwmac1000_dma_init,
++	.init_rx_chan = dwmac1000_dma_init_rx,
++	.init_tx_chan = dwmac1000_dma_init_tx,
++	.axi = dwmac1000_dma_axi,
++	.dump_regs = dwmac1000_dump_dma_regs,
++	.dma_rx_mode = dwmac1000_dma_operation_mode_rx,
++	.dma_tx_mode = dwmac1000_dma_operation_mode_tx,
++	.enable_dma_transmission = dwmac_enable_dma_transmission,
++	.enable_dma_irq = dwmac_enable_dma_irq,
++	.disable_dma_irq = dwmac_disable_dma_irq,
++	.start_tx = dwmac_dma_start_tx,
++	.stop_tx = dwmac_dma_stop_tx,
++	.start_rx = dwmac_dma_start_rx,
++	.stop_rx = dwmac_dma_stop_rx,
++	.dma_interrupt = dwmac_dma_interrupt,
++	.get_hw_feature = dwmac1000_get_hw_feature,
++	.rx_watchdog = dwmac1000_rx_watchdog,
++};
++
++static struct mac_device_info* baikal_dwmac_setup(void *ppriv)
++{
++	struct mac_device_info *mac, *old_mac;
++	struct stmmac_priv *priv = ppriv;
++	int ret;
++
++	mac = devm_kzalloc(priv->device, sizeof(*mac), GFP_KERNEL);
++	if (!mac)
++		return NULL;
++
++	clear_phy_reset(priv->ioaddr);
++
++	mac->dma = &baikal_dwmac_dma_ops;
++	old_mac = priv->hw;
++	priv->hw = mac;
++	ret = dwmac1000_setup(priv);
++	priv->hw = old_mac;
++	if (ret) {
++		dev_err(priv->device, "dwmac1000_setup: error %d", ret);
++		return NULL;
++	}
++	return mac;
++}
++
++static void baikal_dwmac_fix_mac_speed(void *priv, unsigned int speed)
++{
++	struct baikal_dwmac *dwmac = priv;
++	unsigned long tx2_clk_freq = 0;
++	dev_info(dwmac->dev, "fix_mac_speed new speed %u\n", speed);
++	switch (speed) {
++		case SPEED_1000:
++			tx2_clk_freq = 250000000;
++			break;
++		case SPEED_100:
++			tx2_clk_freq = 50000000;
++			break;
++		case SPEED_10:
++			tx2_clk_freq = 5000000;
++			break;
++	}
++	if (dwmac->tx2_clk && tx2_clk_freq != 0) {
++		dev_info(dwmac->dev, "setting TX2 clock frequency to %lu\n", tx2_clk_freq);
++		clk_set_rate(dwmac->tx2_clk, tx2_clk_freq);
++
++	}
++
++}
++
++
++static int dwmac_baikal_probe(struct platform_device *pdev)
++{
++	struct plat_stmmacenet_data *plat_dat;
++	struct stmmac_resources stmmac_res;
++	struct baikal_dwmac *dwmac;
++	int ret;
++
++	ret = stmmac_get_platform_resources(pdev, &stmmac_res);
++	if (ret)
++		return ret;
++
++	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
++	if (ret) {
++		dev_warn(&pdev->dev, "No suitable DMA available\n");
++		return ret;
++	}
++
++	if (pdev->dev.of_node) {
++		plat_dat = stmmac_probe_config_dt(pdev, stmmac_res.mac);
++		if (IS_ERR(plat_dat)) {
++			dev_err(&pdev->dev, "dt configuration failed\n");
++			return PTR_ERR(plat_dat);
++		}
++	} else {
++		plat_dat = dev_get_platdata(&pdev->dev);
++		if (!plat_dat) {
++			dev_err(&pdev->dev, "no platform data provided\n");
++			return  -EINVAL;
++		}
++
++		/* Set default value for multicast hash bins */
++		plat_dat->multicast_filter_bins = HASH_TABLE_SIZE;
++
++		/* Set default value for unicast filter entries */
++		plat_dat->unicast_filter_entries = 1;
++	}
++
++	dwmac = devm_kzalloc(&pdev->dev, sizeof(*dwmac), GFP_KERNEL);
++	if (!dwmac) {
++		ret = -ENOMEM;
++		goto err_remove_config_dt;
++	}
++
++	dwmac->dev = &pdev->dev;
++	dwmac->tx2_clk = devm_clk_get(dwmac->dev, "tx2_clk");
++	if (IS_ERR(dwmac->tx2_clk)) {
++		dev_warn(&pdev->dev, "coldn't get TX2 clock\n");
++		dwmac->tx2_clk = NULL;
++	}
++	plat_dat->fix_mac_speed = baikal_dwmac_fix_mac_speed;
++	plat_dat->bsp_priv = dwmac;
++
++	plat_dat->has_gmac = 1;
++	plat_dat->enh_desc = 1;
++	plat_dat->tx_coe = 1;
++	plat_dat->rx_coe = 1;
++	// TODO: set CSR correct clock in dts!
++	plat_dat->clk_csr = 3;
++	plat_dat->setup = baikal_dwmac_setup;
++
++	dev_info(&pdev->dev, "Baikal Electronics DWMAC glue driver\n");
++
++	ret = stmmac_dvr_probe(&pdev->dev, plat_dat, &stmmac_res);
++	if (ret)
++		goto err_remove_config_dt;
++
++	return 0;
++
++err_remove_config_dt:
++	stmmac_remove_config_dt(pdev, plat_dat);
++
++	return ret;
++}
++
++static const struct of_device_id dwmac_baikal_match[] = {
++	{ .compatible = "be,dwmac-3.710"},
++	{ .compatible = "be,dwmac"},
++	{ }
++};
++MODULE_DEVICE_TABLE(of, dwmac_baikal_match);
++
++static struct platform_driver dwmac_baikal_driver = {
++	.probe  = dwmac_baikal_probe,
++	.remove = stmmac_pltfr_remove,
++	.driver = {
++		.name           = "baikal-dwmac",
++		.pm		= &stmmac_pltfr_pm_ops,
++		.of_match_table = of_match_ptr(dwmac_baikal_match),
++	},
++};
++module_platform_driver(dwmac_baikal_driver);
++
++MODULE_DESCRIPTION("Baikal dwmac glue driver");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac1000_core.c b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_core.c
+index 76edb9b7267..7b8a955d98a 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac1000_core.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_core.c
+@@ -563,3 +563,4 @@ int dwmac1000_setup(struct stmmac_priv *priv)
+ 
+ 	return 0;
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_setup);
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c
+index f5581db0ba9..0e828f5d9a9 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.c
+@@ -16,7 +16,7 @@
+ #include "dwmac1000.h"
+ #include "dwmac_dma.h"
+ 
+-static void dwmac1000_dma_axi(void __iomem *ioaddr, struct stmmac_axi *axi)
++void dwmac1000_dma_axi(void __iomem *ioaddr, struct stmmac_axi *axi)
+ {
+ 	u32 value = readl(ioaddr + DMA_AXI_BUS_MODE);
+ 	int i;
+@@ -69,9 +69,10 @@ static void dwmac1000_dma_axi(void __iomem *ioaddr, struct stmmac_axi *axi)
+ 
+ 	writel(value, ioaddr + DMA_AXI_BUS_MODE);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_dma_axi);
+ 
+-static void dwmac1000_dma_init(void __iomem *ioaddr,
+-			       struct stmmac_dma_cfg *dma_cfg, int atds)
++void dwmac1000_dma_init(void __iomem *ioaddr,
++		        struct stmmac_dma_cfg *dma_cfg, int atds)
+ {
+ 	u32 value = readl(ioaddr + DMA_BUS_MODE);
+ 	int txpbl = dma_cfg->txpbl ?: dma_cfg->pbl;
+@@ -109,22 +110,25 @@ static void dwmac1000_dma_init(void __iomem *ioaddr,
+ 	/* Mask interrupts by writing to CSR7 */
+ 	writel(DMA_INTR_DEFAULT_MASK, ioaddr + DMA_INTR_ENA);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_dma_init);
+ 
+-static void dwmac1000_dma_init_rx(void __iomem *ioaddr,
+-				  struct stmmac_dma_cfg *dma_cfg,
+-				  dma_addr_t dma_rx_phy, u32 chan)
++void dwmac1000_dma_init_rx(void __iomem *ioaddr,
++			   struct stmmac_dma_cfg *dma_cfg,
++			   dma_addr_t dma_rx_phy, u32 chan)
+ {
+ 	/* RX descriptor base address list must be written into DMA CSR3 */
+ 	writel(lower_32_bits(dma_rx_phy), ioaddr + DMA_RCV_BASE_ADDR);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_dma_init_rx);
+ 
+-static void dwmac1000_dma_init_tx(void __iomem *ioaddr,
+-				  struct stmmac_dma_cfg *dma_cfg,
+-				  dma_addr_t dma_tx_phy, u32 chan)
++void dwmac1000_dma_init_tx(void __iomem *ioaddr,
++			   struct stmmac_dma_cfg *dma_cfg,
++			   dma_addr_t dma_tx_phy, u32 chan)
+ {
+ 	/* TX descriptor base address list must be written into DMA CSR4 */
+ 	writel(lower_32_bits(dma_tx_phy), ioaddr + DMA_TX_BASE_ADDR);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_dma_init_tx);
+ 
+ static u32 dwmac1000_configure_fc(u32 csr6, int rxfifosz)
+ {
+@@ -147,8 +151,8 @@ static u32 dwmac1000_configure_fc(u32 csr6, int rxfifosz)
+ 	return csr6;
+ }
+ 
+-static void dwmac1000_dma_operation_mode_rx(void __iomem *ioaddr, int mode,
+-					    u32 channel, int fifosz, u8 qmode)
++void dwmac1000_dma_operation_mode_rx(void __iomem *ioaddr, int mode,
++				     u32 channel, int fifosz, u8 qmode)
+ {
+ 	u32 csr6 = readl(ioaddr + DMA_CONTROL);
+ 
+@@ -174,9 +178,10 @@ static void dwmac1000_dma_operation_mode_rx(void __iomem *ioaddr, int mode,
+ 
+ 	writel(csr6, ioaddr + DMA_CONTROL);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_dma_operation_mode_rx);
+ 
+-static void dwmac1000_dma_operation_mode_tx(void __iomem *ioaddr, int mode,
+-					    u32 channel, int fifosz, u8 qmode)
++void dwmac1000_dma_operation_mode_tx(void __iomem *ioaddr, int mode,
++				     u32 channel, int fifosz, u8 qmode)
+ {
+ 	u32 csr6 = readl(ioaddr + DMA_CONTROL);
+ 
+@@ -207,8 +212,9 @@ static void dwmac1000_dma_operation_mode_tx(void __iomem *ioaddr, int mode,
+ 
+ 	writel(csr6, ioaddr + DMA_CONTROL);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_dma_operation_mode_tx);
+ 
+-static void dwmac1000_dump_dma_regs(void __iomem *ioaddr, u32 *reg_space)
++void dwmac1000_dump_dma_regs(void __iomem *ioaddr, u32 *reg_space)
+ {
+ 	int i;
+ 
+@@ -217,9 +223,10 @@ static void dwmac1000_dump_dma_regs(void __iomem *ioaddr, u32 *reg_space)
+ 			reg_space[DMA_BUS_MODE / 4 + i] =
+ 				readl(ioaddr + DMA_BUS_MODE + i * 4);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_dump_dma_regs);
+ 
+-static int dwmac1000_get_hw_feature(void __iomem *ioaddr,
+-				    struct dma_features *dma_cap)
++int dwmac1000_get_hw_feature(void __iomem *ioaddr,
++			     struct dma_features *dma_cap)
+ {
+ 	u32 hw_cap = readl(ioaddr + DMA_HW_FEATURE);
+ 
+@@ -262,12 +269,14 @@ static int dwmac1000_get_hw_feature(void __iomem *ioaddr,
+ 
+ 	return 0;
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_get_hw_feature);
+ 
+-static void dwmac1000_rx_watchdog(void __iomem *ioaddr, u32 riwt,
+-				  u32 queue)
++void dwmac1000_rx_watchdog(void __iomem *ioaddr, u32 riwt,
++			   u32 queue)
+ {
+ 	writel(riwt, ioaddr + DMA_RX_WATCHDOG);
+ }
++EXPORT_SYMBOL_GPL(dwmac1000_rx_watchdog);
+ 
+ const struct stmmac_dma_ops dwmac1000_dma_ops = {
+ 	.reset = dwmac_dma_reset,
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.h b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.h
+new file mode 100644
+index 00000000000..068422e90d6
+--- /dev/null
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac1000_dma.h
+@@ -0,0 +1,26 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++
++#ifndef __DWMAC1000_DMA_H__
++#define __DWMAC1000_DMA_H__
++#include "dwmac1000.h"
++
++void dwmac1000_dma_axi(void __iomem *ioaddr, struct stmmac_axi *axi);
++void dwmac1000_dma_init(void __iomem *ioaddr,
++		        struct stmmac_dma_cfg *dma_cfg, int atds);
++void dwmac1000_dma_init_rx(void __iomem *ioaddr,
++			   struct stmmac_dma_cfg *dma_cfg,
++			   dma_addr_t dma_rx_phy, u32 chan);
++void dwmac1000_dma_init_tx(void __iomem *ioaddr,
++			   struct stmmac_dma_cfg *dma_cfg,
++			   dma_addr_t dma_tx_phy, u32 chan);
++void dwmac1000_dma_operation_mode_rx(void __iomem *ioaddr, int mode,
++				     u32 channel, int fifosz, u8 qmode);
++void dwmac1000_dma_operation_mode_tx(void __iomem *ioaddr, int mode,
++				     u32 channel, int fifosz, u8 qmode);
++void dwmac1000_dump_dma_regs(void __iomem *ioaddr, u32 *reg_space);
++
++int dwmac1000_get_hw_feature(void __iomem *ioaddr,
++			     struct dma_features *dma_cap);
++
++void dwmac1000_rx_watchdog(void __iomem *ioaddr, u32 riwt, u32 number_chan);
++#endif /* __DWMAC1000_DMA_H__ */
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac_lib.c b/drivers/net/ethernet/stmicro/stmmac/dwmac_lib.c
+index caa4bfc4c1d..2d8d1b0e2b9 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac_lib.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac_lib.c
+@@ -31,6 +31,7 @@ void dwmac_enable_dma_transmission(void __iomem *ioaddr)
+ {
+ 	writel(1, ioaddr + DMA_XMT_POLL_DEMAND);
+ }
++EXPORT_SYMBOL_GPL(dwmac_enable_dma_transmission);
+ 
+ void dwmac_enable_dma_irq(void __iomem *ioaddr, u32 chan, bool rx, bool tx)
+ {
+@@ -43,6 +44,7 @@ void dwmac_enable_dma_irq(void __iomem *ioaddr, u32 chan, bool rx, bool tx)
+ 
+ 	writel(value, ioaddr + DMA_INTR_ENA);
+ }
++EXPORT_SYMBOL_GPL(dwmac_enable_dma_irq);
+ 
+ void dwmac_disable_dma_irq(void __iomem *ioaddr, u32 chan, bool rx, bool tx)
+ {
+@@ -55,6 +57,7 @@ void dwmac_disable_dma_irq(void __iomem *ioaddr, u32 chan, bool rx, bool tx)
+ 
+ 	writel(value, ioaddr + DMA_INTR_ENA);
+ }
++EXPORT_SYMBOL_GPL(dwmac_disable_dma_irq);
+ 
+ void dwmac_dma_start_tx(void __iomem *ioaddr, u32 chan)
+ {
+@@ -62,6 +65,7 @@ void dwmac_dma_start_tx(void __iomem *ioaddr, u32 chan)
+ 	value |= DMA_CONTROL_ST;
+ 	writel(value, ioaddr + DMA_CONTROL);
+ }
++EXPORT_SYMBOL_GPL(dwmac_dma_start_tx);
+ 
+ void dwmac_dma_stop_tx(void __iomem *ioaddr, u32 chan)
+ {
+@@ -69,6 +73,7 @@ void dwmac_dma_stop_tx(void __iomem *ioaddr, u32 chan)
+ 	value &= ~DMA_CONTROL_ST;
+ 	writel(value, ioaddr + DMA_CONTROL);
+ }
++EXPORT_SYMBOL_GPL(dwmac_dma_stop_tx);
+ 
+ void dwmac_dma_start_rx(void __iomem *ioaddr, u32 chan)
+ {
+@@ -76,6 +81,7 @@ void dwmac_dma_start_rx(void __iomem *ioaddr, u32 chan)
+ 	value |= DMA_CONTROL_SR;
+ 	writel(value, ioaddr + DMA_CONTROL);
+ }
++EXPORT_SYMBOL_GPL(dwmac_dma_start_rx);
+ 
+ void dwmac_dma_stop_rx(void __iomem *ioaddr, u32 chan)
+ {
+@@ -83,6 +89,7 @@ void dwmac_dma_stop_rx(void __iomem *ioaddr, u32 chan)
+ 	value &= ~DMA_CONTROL_SR;
+ 	writel(value, ioaddr + DMA_CONTROL);
+ }
++EXPORT_SYMBOL_GPL(dwmac_dma_stop_rx);
+ 
+ #ifdef DWMAC_DMA_DEBUG
+ static void show_tx_process_state(unsigned int status)
+@@ -230,6 +237,7 @@ int dwmac_dma_interrupt(void __iomem *ioaddr,
+ 
+ 	return ret;
+ }
++EXPORT_SYMBOL_GPL(dwmac_dma_interrupt);
+ 
+ void dwmac_dma_flush_tx_fifo(void __iomem *ioaddr)
+ {
+diff --git a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+index a5d150c5f3d..b4293e9e40e 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
++++ b/drivers/net/ethernet/stmicro/stmmac/stmmac_mdio.c
+@@ -346,6 +346,63 @@ err_disable_clks:
+ 	return ret;
+ }
+ 
++#define MAC_GPIO 0xe0 /* GPIO register */
++#define MAC_GPIO_GPO0 (1 << 8) /* 0-output port */
++
++/**
++ * Reset the MII bus via MAC GP out pin
++ */
++static int stmmac_mdio_reset_gp_out(struct stmmac_priv *priv) {
++#if IS_ENABLED(CONFIG_STMMAC_PLATFORM) && IS_ENABLED(CONFIG_OF)
++	u32 value, high, low;
++	u32 delays[3] = { 0, 0, 0 };
++	bool active_low = false;
++	struct device_node *np = priv->device->of_node;
++
++	if (!np)
++		return -ENODEV;
++
++	if (!of_property_read_bool(np, "snps,reset-gp-out")) {
++		dev_warn(priv->device, "snps,reset-gp-out is not set\n");
++		return -ENODEV;
++	}
++
++	active_low = of_property_read_bool(np, "snsps,reset-active-low");
++	of_property_read_u32_array(np, "snps,reset-delays-us", delays, 3);
++
++	value = readl(priv->ioaddr + MAC_GPIO);
++	if (active_low) {
++		high = value | MAC_GPIO_GPO0;
++		low = value & ~MAC_GPIO_GPO0;
++	} else {
++		high = value & ~MAC_GPIO_GPO0;
++		low = value | MAC_GPIO_GPO0;
++	}
++
++	writel(high, priv->ioaddr + MAC_GPIO);
++	if (delays[0])
++		msleep(DIV_ROUND_UP(delays[0], 1000));
++
++	writel(low, priv->ioaddr + MAC_GPIO);
++	if (delays[1])
++		msleep(DIV_ROUND_UP(delays[1], 1000));
++
++	writel(high, priv->ioaddr + MAC_GPIO);
++	if (delays[2])
++		msleep(DIV_ROUND_UP(delays[2], 1000));
++
++	/* Clear PHY reset */
++	udelay(10);
++	value = readl(priv->ioaddr + MAC_GPIO);
++	value |= MAC_GPIO_GPO0;
++	writel(value, priv->ioaddr + MAC_GPIO);
++	mdelay(1000);
++	dev_info(priv->device, "mdio reset completed\n");
++	return 0;
++#endif
++	return -ENODEV;
++}
++
+ /**
+  * stmmac_mdio_reset
+  * @bus: points to the mii_bus structure
+@@ -361,13 +418,20 @@ int stmmac_mdio_reset(struct mii_bus *bus)
+ #ifdef CONFIG_OF
+ 	if (priv->device->of_node) {
+ 		struct gpio_desc *reset_gpio;
++		bool need_reset_gp_out;
+ 		u32 delays[3] = { 0, 0, 0 };
+ 
+ 		reset_gpio = devm_gpiod_get_optional(priv->device,
+ 						     "snps,reset",
+ 						     GPIOD_OUT_LOW);
+-		if (IS_ERR(reset_gpio))
+-			return PTR_ERR(reset_gpio);
++		if (IS_ERR(reset_gpio)) {
++			need_reset_gp_out = of_property_read_bool(priv->device->of_node,
++								  "snps,reset-gp-out");
++			if (need_reset_gp_out)
++				return stmmac_mdio_reset_gp_out(priv);
++			else
++				return PTR_ERR(reset_gpio);
++		}
+ 
+ 		device_property_read_u32_array(priv->device,
+ 					       "snps,reset-delays-us",
+diff --git a/drivers/net/mdio/Kconfig b/drivers/net/mdio/Kconfig
+index 6da1fcb2584..02726e6a94e 100644
+--- a/drivers/net/mdio/Kconfig
++++ b/drivers/net/mdio/Kconfig
+@@ -193,6 +193,13 @@ config MDIO_THUNDER
+ 	  ThunderX SoCs when the MDIO bus device appears as a PCI
+ 	  device.
+ 
++config MDIO_BAIKAL
++	tristate "Driver for the Baikal Electronics GPIO MDIO bus"
++	depends on OF && GPIOLIB && MDIO_BITBANG
++	default m if ARCH_BAIKAL
++	help
++	  Support for Baikal Electronics GPIO MDIO bus
++
+ comment "MDIO Multiplexers"
+ 
+ config MDIO_BUS_MUX
+@@ -272,6 +279,5 @@ config MDIO_BUS_MUX_MMIOREG
+ 
+ 	  Currently, only 8/16/32 bits registers are supported.
+ 
+-
+ endif
+ endif
+diff --git a/drivers/net/mdio/Makefile b/drivers/net/mdio/Makefile
+index 15f8dc4042c..fd6d0956ddc 100644
+--- a/drivers/net/mdio/Makefile
++++ b/drivers/net/mdio/Makefile
+@@ -22,6 +22,7 @@ obj-$(CONFIG_MDIO_OCTEON)		+= mdio-octeon.o
+ obj-$(CONFIG_MDIO_SUN4I)		+= mdio-sun4i.o
+ obj-$(CONFIG_MDIO_THUNDER)		+= mdio-thunder.o
+ obj-$(CONFIG_MDIO_XGENE)		+= mdio-xgene.o
++obj-$(CONFIG_MDIO_BAIKAL)		+= mdio-baikal.o
+ 
+ obj-$(CONFIG_MDIO_BUS_MUX)		+= mdio-mux.o
+ obj-$(CONFIG_MDIO_BUS_MUX_BCM6368)	+= mdio-mux-bcm6368.o
+diff --git a/drivers/net/mdio/mdio-baikal.c b/drivers/net/mdio/mdio-baikal.c
+new file mode 100644
+index 00000000000..cf2120cd815
+--- /dev/null
++++ b/drivers/net/mdio/mdio-baikal.c
+@@ -0,0 +1,540 @@
++/*
++ * Baikal Electronics SFP+ mezzanine card MDIO bus driver
++ * Supports OpenFirmware.
++ *
++ * Based on Bitbanged MDIO support driver.
++ * drivers/net/phy/mdio-bitbang.c
++ *
++ * Author: Scott Wood <scottwood@freescale.com>
++ * Copyright (c) 2007 Freescale Semiconductor
++ *
++ * Based on CPM2 MDIO code which is:
++ *
++ * Copyright (c) 2003 Intracom S.A.
++ *  by Pantelis Antoniou <panto@intracom.gr>
++ *
++ * 2005 (c) MontaVista Software, Inc.
++ * Vitaly Bordug <vbordug@ru.mvista.com>
++ *
++ * Paritaly based on GPIO based MDIO bitbang driver.
++ * drivers/net/phy/mdio-gpio.c
++ *
++ * Copyright (c) 2015 Baikal Electronics JSC.
++ *
++ * Author:
++ *   Dmitry Dunaev <dmitry.dunaev@baikalelectronics.ru>
++ *
++ * This file is licensed under the terms of the GNU General Public License
++ * version 2. This program is licensed "as is" without any warranty of any
++ * kind, whether express or implied.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are met:
++ *     * Redistributions of source code must retain the above copyright
++ *       notice, this list of conditions and the following disclaimer.
++ *     * Redistributions in binary form must reproduce the above copyright
++ *       notice, this list of conditions and the following disclaimer in the
++ *       documentation and/or other materials provided with the distribution.
++ *     * Neither the name of Baikal Electronics JSC nor the names of its
++ *       contributors may be used to endorse or promote products derived
++ *       from this software without specific prior written permission.
++ */
++
++#include <linux/module.h>
++#include <linux/slab.h>
++#include <linux/interrupt.h>
++#include <linux/platform_device.h>
++#include <linux/mdio-bitbang.h>
++#include <linux/gpio.h>
++#include <linux/delay.h>
++#include <linux/mdio.h>
++#include <linux/phy.h>
++#include <linux/clk.h>
++
++#include <linux/of_device.h>
++#include <linux/of_gpio.h>
++#include <linux/of_mdio.h>
++
++#define MDIO_READ 			2
++#define MDIO_WRITE 			1
++
++#define MDIO_C45			(1<<15)
++#define MDIO_C45_ADDR		(MDIO_C45 | 0)
++#define MDIO_C45_READ		(MDIO_C45 | 3)
++#define MDIO_C45_WRITE		(MDIO_C45 | 1)
++#define MDIO_C45_READ_INC	(MDIO_C45 | 2)
++
++/*
++ * Minimum MDC period is 400 ns, plus some margin for error.
++ * MDIO_DELAY is done twice per period.
++ * Baikal-T SoC GPIO pins trigger clock is 1 MHz.
++ */
++#define MDIO_DELAY 14
++
++/*
++ * The PHY may take up to 300 ns to produce data, plus some margin
++ * for error.
++ * Baikal-T SoC GPIO pins trigger clock is 1 MHz.
++ */
++#define MDIO_READ_DELAY_US	10
++#define MDIO_RESET_DELAY_US	100
++
++/*
++ * Driver specific defines
++ */
++#define DRIVER_NAME	"Baikal Electronics mezzanine card MDIO bus driver"
++#define DRIVER_VERSION	"1.04a"
++#define DRIVER_DEV	"be-mdio"
++
++/* Default GPIO trigger freq is 1 MHz */
++#define MDIO_TRIG_FREQ	1000000
++
++/*
++ * Basic driver function
++ */
++struct be_mdio_data {
++	struct phy_device *phydev;
++	struct mii_bus *mii;
++	struct clk *clk;
++	int mdc, mdio, mdo, rst;
++	int mdc_active_low, mdio_active_low;
++	int mdo_active_low, rst_active_low;
++	unsigned int delay, read_delay, reset_delay;
++    /* PHY addresses to be ignored when probing */
++    unsigned int phy_mask;
++    /* IRQ mask */
++	int irqs[PHY_MAX_ADDR];
++};
++
++/*
++ * Physical level of MDIO bus
++ */
++static inline void be_mdio_dir(struct be_mdio_data *data, int dir)
++{
++	if (data->mdo >= 0) {
++		/* Separate output pin. Always set its value to high
++		 * when changing direction. If direction is input,
++		 * assume the pin serves as pull-up. If direction is
++		 * output, the default value is high.
++		 */
++		gpio_set_value(data->mdo, 1 ^ data->mdo_active_low);
++		return;
++	}
++
++	if (dir)
++		gpio_direction_output(data->mdio, 1 ^ data->mdio_active_low);
++	else
++		gpio_direction_input(data->mdio);
++}
++
++static inline int be_mdio_get(struct be_mdio_data *data)
++{
++	return gpio_get_value(data->mdio) ^ data->mdio_active_low;
++}
++
++static inline void be_mdio_set(struct be_mdio_data *data, int what)
++{
++	if (data->mdo >= 0)
++		gpio_set_value(data->mdo, what ^ data->mdo_active_low);
++	else
++		gpio_set_value(data->mdio, what ^ data->mdio_active_low);
++}
++
++static inline void be_mdc_set(struct be_mdio_data *data, int what)
++{
++	gpio_set_value(data->mdc, what ^ data->mdc_active_low);
++}
++
++/*
++ * Logical level of MDIO bus
++ */
++
++/* MDIO must already be configured as output. */
++static void be_mdio_send_bit(struct be_mdio_data *data, int val) {
++	be_mdio_set(data, val);
++	//ndelay(MDIO_DELAY);	//udelay(1..3);ndelay(400);
++	udelay(MDIO_DELAY);
++	be_mdc_set(data, 1);
++	//ndelay(MDIO_DELAY);	//udelay(1..3);ndelay(400);
++	udelay(MDIO_DELAY);
++	be_mdc_set(data, 0);
++}
++
++/* MDIO must already be configured as output. */
++/*static void be_mdio_send_ta(struct be_mdio_data *data, int val) {
++	be_mdio_set(data, val);
++	mdelay(data->read_delay);
++	be_mdc_set(data, 1);
++	mdelay(data->read_delay);
++	be_mdc_set(data, 0);
++}*/
++
++/* MDIO must already be configured as input. */
++static int be_mdio_get_bit(struct be_mdio_data *data) {
++	udelay(MDIO_DELAY);
++	be_mdc_set(data, 1);
++	udelay(MDIO_DELAY);
++	be_mdc_set(data, 0);
++	return be_mdio_get(data);
++}
++
++/* MDIO must already be configured as output. */
++static void be_mdio_send_num(struct be_mdio_data *data, u16 val, int bits) {
++	int i;
++
++	be_mdio_dir(data, 1);
++
++	for (i = bits - 1; i >= 0; i--)
++		be_mdio_send_bit(data, (val >> i) & 1);
++}
++
++/* MDIO must already be configured as input. */
++static u16 be_mdio_get_num(struct be_mdio_data *data, int bits) {
++	int i;
++	u16 ret = 0;
++
++	be_mdio_dir(data, 0);
++
++	for (i = bits - 1; i >= 0; i--) {
++		ret <<= 1;
++		ret |= be_mdio_get_bit(data);
++	}
++	return ret;
++}
++
++/*
++ * Utility to send the preamble, address, and
++ * register (common to read and write).
++ */
++static void be_mdio_cmd(struct be_mdio_data *data, int op, u8 phy, u8 reg) {
++	int i;
++
++	be_mdio_dir(data, 1);
++	/*
++	 * Send a 32 bit preamble ('1's) with an extra '1' bit for good
++	 * measure.  The IEEE spec says this is a PHY optional
++	 * requirement. This means that we are doing more preambles
++	 * than we need, but it is safer and will be much more robust.
++	 */
++	for (i = 0; i < 32; i++)
++		be_mdio_send_bit(data, 1);
++	/*
++	 * Send the start bit (01) and the read opcode (10) or write (10).
++	 * Clause 45 operation uses 00 for the start and 11, 10 for
++	 * read/write.
++	 */
++	be_mdio_send_bit(data, 0);
++	if (op & MDIO_C45)
++		be_mdio_send_bit(data, 0);
++	else
++		be_mdio_send_bit(data, 1);
++	be_mdio_send_bit(data, (op >> 1) & 1);
++	be_mdio_send_bit(data, (op >> 0) & 1);
++
++	be_mdio_send_num(data, phy, 5);
++	be_mdio_send_num(data, reg, 5);
++}
++
++/* In clause 45 mode all commands are prefixed by MDIO_ADDR to specify the
++   lower 16 bits of the 21 bit address. This transfer is done identically to a
++   MDIO_WRITE except for a different code. To enable clause 45 mode or
++   MII_ADDR_C45 into the address. Theoretically clause 45 and normal devices
++   can exist on the same bus. Normal devices should ignore the MDIO_ADDR
++   phase. */
++static int be_mdio_cmd_addr(struct be_mdio_data *data, int phy, u32 addr) {
++	unsigned int dev_addr = (addr >> 16) & 0x1F;
++	unsigned int reg = addr & 0xFFFF;
++
++	be_mdio_cmd(data, MDIO_C45_ADDR, phy, dev_addr);
++
++	/* send the turnaround (10) */
++	be_mdio_send_bit(data, 1);
++	be_mdio_send_bit(data, 0);
++
++	be_mdio_send_num(data, reg, 16);
++
++	be_mdio_dir(data, 0);
++	be_mdio_get_bit(data);
++
++	return dev_addr;
++}
++
++static int be_mdio_read(struct mii_bus *bus, int phy, int reg) {
++	struct be_mdio_data *data = bus->priv;
++	int ret, i;
++
++	if (reg & MII_ADDR_C45) {
++		reg = be_mdio_cmd_addr(data, phy, reg);
++		be_mdio_cmd(data, MDIO_C45_READ, phy, reg);
++	} else
++		be_mdio_cmd(data, MDIO_READ, phy, reg);
++
++	be_mdio_dir(data, 0);
++
++	/* check the turnaround bit: the PHY should be driving it to zero */
++	if (be_mdio_get_bit(data) != 0) {
++		/* PHY didn't drive TA low -- flush any bits it may be trying to send. */
++		for (i = 0; i < 32; i++)
++			be_mdio_get_bit(data);
++
++		return 0xffff;
++	}
++
++	ret = be_mdio_get_num(data, 16);
++	be_mdio_get_bit(data);
++	return ret;
++}
++
++static int be_mdio_write(struct mii_bus *bus, int phy, int reg, u16 val) {
++	struct be_mdio_data *data = bus->priv;
++
++	if (reg & MII_ADDR_C45) {
++		reg = be_mdio_cmd_addr(data, phy, reg);
++		be_mdio_cmd(data, MDIO_C45_WRITE, phy, reg);
++	} else
++		be_mdio_cmd(data, MDIO_WRITE, phy, reg);
++
++	/* send the turnaround (10) */
++	be_mdio_send_bit(data, 1);
++	be_mdio_send_bit(data, 0);
++
++	be_mdio_send_num(data, val, 16);
++
++	be_mdio_dir(data, 0);
++	be_mdio_get_bit(data);
++
++	return 0;
++}
++
++static int __maybe_unused be_mdio_reset(struct mii_bus *bus) {
++	struct be_mdio_data *data = bus->priv;
++
++	if (data->rst < 0)
++		return 0;
++
++	gpio_set_value(data->rst, 1 ^ data->rst_active_low);
++	mdelay(data->reset_delay);
++
++	gpio_set_value(data->rst, 0 ^ data->rst_active_low);
++	mdelay(data->reset_delay);
++
++	return 0;
++}
++
++/*
++ * MDIO bus open firmware data
++ */
++static void *be_mdio_of_get_data(struct platform_device *pdev)
++{
++	struct device_node *np = pdev->dev.of_node;
++	struct be_mdio_data *pdata;
++	enum of_gpio_flags flags;
++	unsigned int freq = 0; 
++	int ret;
++
++	pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
++	if (!pdata)
++		return NULL;
++
++	ret =  of_get_named_gpio_flags(np, "mdc-pin", 0, &flags);
++	if (ret < 0)
++		return NULL;
++
++	pdata->mdc = ret;
++	pdata->mdc_active_low = flags & OF_GPIO_ACTIVE_LOW;
++
++	ret =  of_get_named_gpio_flags(np, "mdio-pin", 0, &flags);
++	if (ret < 0)
++		return NULL;
++	pdata->mdio = ret;
++	pdata->mdio_active_low = flags & OF_GPIO_ACTIVE_LOW;
++
++	pdata->mdo = -1;
++	ret = of_get_named_gpio_flags(np, "mdo-pin", 0, &flags);
++	if (ret >= 0) {
++		pdata->mdo = ret;
++		pdata->mdo_active_low = flags & OF_GPIO_ACTIVE_LOW;
++	}
++
++	pdata->rst = -1;
++	ret =  of_get_named_gpio_flags(np, "rst-pin", 0, &flags);
++	if (ret >= 0) {
++		pdata->rst = ret;
++		pdata->rst_active_low = flags & OF_GPIO_ACTIVE_LOW;
++	}
++
++	pdata->clk = of_clk_get(np, 0);
++
++	if (IS_ERR(pdata->clk))
++		of_property_read_u32(pdev->dev.of_node, "clock-frequency", &freq);
++	else
++		freq =  clk_get_rate(pdata->clk);
++
++	if (!freq)
++		freq = MDIO_TRIG_FREQ;
++
++	ret = 1000000 / freq;
++
++	/* Timing */
++	pdata->read_delay = (ret > MDIO_READ_DELAY_US) ? ret : MDIO_READ_DELAY_US;
++	pdata->reset_delay = (ret > MDIO_RESET_DELAY_US) ?  ret : MDIO_RESET_DELAY_US;
++
++	return pdata;
++}
++
++/*
++ * MDIO bus init
++ */
++static struct mii_bus *be_mdio_bus_init(struct device *dev, struct be_mdio_data *pdata, int bus_id) {
++	struct mii_bus *bus;
++	int i;
++
++	bus = mdiobus_alloc();
++	if (!bus) {
++		dev_err(dev, "Unable to allocate MDIO bus\n");
++		goto error;
++	}
++
++	bus->read = be_mdio_read;
++	bus->write = be_mdio_write;
++	bus->priv = pdata;
++
++	bus->name = "Baikal GPIO MDIO bus";
++
++	bus->phy_mask = pdata->phy_mask;
++	memcpy(bus->irq, pdata->irqs, PHY_MAX_ADDR);
++	bus->parent = dev;
++
++	if (bus->phy_mask == ~0) {
++		dev_err(dev, "All PHY's are masked - nothing to attach\n");
++		goto error_free_bus;
++	}
++
++	for (i = 0; i < PHY_MAX_ADDR; i++)
++		if (!bus->irq[i])
++			bus->irq[i] = PHY_POLL;
++
++	snprintf(bus->id, MII_BUS_ID_SIZE, "mdio-gpio%d", bus_id);
++
++	if (devm_gpio_request(dev, pdata->mdc, "mdc")) {
++		dev_err(dev, "MDC line (gpio%d) request failed\n", pdata->mdc);
++		goto error_free_bus;
++	}
++
++	if (devm_gpio_request(dev, pdata->mdio, "mdio")){
++		dev_err(dev, "MDIO line (gpio%d) request failed\n", pdata->mdc);
++		goto error_free_bus;
++	}
++
++	if (pdata->mdo >= 0) {
++		if (devm_gpio_request(dev, pdata->mdo, "mdo"))
++			goto error_free_bus;
++		gpio_direction_output(pdata->mdo, 1);
++		gpio_direction_input(pdata->mdio);
++	}
++
++	if (pdata->rst >= 0) {
++		if (devm_gpio_request(dev, pdata->rst, "rst"))
++			pdata->rst= -1;
++		else 
++			gpio_direction_output(pdata->rst, 0);
++	}
++
++	gpio_direction_output(pdata->mdc, 0);
++
++	dev_set_drvdata(dev, bus);
++
++	return bus;
++
++error_free_bus:
++	mdiobus_free(bus);
++error:
++	return NULL;
++}
++
++static int be_mdio_probe(struct platform_device *pdev)
++{
++	struct be_mdio_data *pdata;
++	struct mii_bus *bus;
++	int ret, bus_id;
++
++	if (pdev->dev.of_node) {
++		pdata = be_mdio_of_get_data(pdev);
++		bus_id = of_alias_get_id(pdev->dev.of_node, "mdio-gpio");
++		if (bus_id < 0) {
++			dev_warn(&pdev->dev, "failed to get alias id\n");
++			bus_id = 0;
++		}
++	} else {
++		pdata = dev_get_platdata(&pdev->dev);
++		bus_id = pdev->id;
++	}
++
++	if (!pdata) {
++		dev_err(&pdev->dev, "No MDIO bus platform data\n");
++		return -ENODEV;
++	}
++
++	bus = be_mdio_bus_init(&pdev->dev, pdata, bus_id);
++	if (!bus) {
++		dev_err(&pdev->dev, "MDIO bus init failed\n");
++		return -ENODEV;
++	}
++
++	if (pdev->dev.of_node)
++		ret = of_mdiobus_register(bus, pdev->dev.of_node);
++	else
++		ret = mdiobus_register(bus);
++
++	if (ret) {
++		dev_err(&pdev->dev, "MDIO bus register failed\n");
++		goto err_mdiobus_register;
++	}
++
++	// bus->reset = be_mdio_reset;
++
++	pdata->mii = bus;
++	dev_info(&pdev->dev, "MDIO ptr=%p\n", bus);
++
++	dev_info(&pdev->dev, DRIVER_NAME);
++	dev_info(&pdev->dev, "Version: " DRIVER_VERSION);
++
++	return 0;
++
++err_mdiobus_register:
++	mdiobus_free(bus);
++
++	return ret;
++}
++
++static int be_mdio_remove(struct platform_device *pdev)
++{
++
++	struct mii_bus *bus = dev_get_drvdata(&pdev->dev);
++	mdiobus_unregister(bus);
++	mdiobus_free(bus);
++
++	return 0;
++}
++
++static struct of_device_id be_mdio_of_match[] = {
++	{ .compatible = "be,mdio-gpio", },
++	{ /* sentinel */ }
++};
++
++static struct platform_driver be_mdio_driver = {
++	.probe = be_mdio_probe,
++	.remove = be_mdio_remove,
++	.driver		= {
++		.name	= "be-mdio",
++		.of_match_table = be_mdio_of_match,
++	},
++};
++
++module_platform_driver(be_mdio_driver);
++
++MODULE_ALIAS("platform:be-mdio");
++MODULE_AUTHOR("Dmitry Dunaev");
++MODULE_LICENSE("GPL v2");
++MODULE_VERSION(DRIVER_VERSION);
++MODULE_DESCRIPTION(DRIVER_NAME);
+diff --git a/drivers/net/phy/realtek.c b/drivers/net/phy/realtek.c
+index a5671ab896b..cd70469f349 100644
+--- a/drivers/net/phy/realtek.c
++++ b/drivers/net/phy/realtek.c
+@@ -12,6 +12,8 @@
+ #include <linux/phy.h>
+ #include <linux/module.h>
+ #include <linux/delay.h>
++#include <linux/of.h>
++#include <dt-bindings/net/realtek-phy-rtl8211f.h>
+ 
+ #define RTL821x_PHYSR				0x11
+ #define RTL821x_PHYSR_DUPLEX			BIT(13)
+@@ -51,6 +53,7 @@
+ #define RTL8201F_ISR_MASK			(RTL8201F_ISR_ANERR | \
+ 						 RTL8201F_ISR_DUPLEX | \
+ 						 RTL8201F_ISR_LINK)
++#define RTL8211F_LCR_MASK			0xef7b
+ #define RTL8201F_IER				0x13
+ 
+ #define RTL8366RB_POWER_SAVE			0x15
+@@ -333,9 +336,50 @@ static int rtl8211f_config_init(struct phy_device *phydev)
+ {
+ 	struct rtl821x_priv *priv = phydev->priv;
+ 	struct device *dev = &phydev->mdio.dev;
++	const struct device_node *of_node = dev->of_node;
++
++	/* Default LED configuration values from RTL8211F datasheet */
++	u32 led_mode = RTL8211F_LED_MODE_A;
++	u32 led0_ctrl = RTL8211F_LINK10_ACT;
++	u32 led1_ctrl = RTL8211F_LINK100_ACT;
++	u32 led2_ctrl = RTL8211F_LINK1000_ACT;
++	static const uint8_t lcr_values[] = {
++		0x1b, 0x0b, 0x13, 0x03, 0x19, 0x09, 0x11,
++		0x01, 0x1a, 0x0a, 0x12, 0x02, 0x18, 0x08
++	};
+ 	u16 val_txdly, val_rxdly;
++	u16 val_lcr;
+ 	int ret;
+ 
++	of_property_read_u32(of_node, "realtek,led-mode", &led_mode);
++	of_property_read_u32(of_node, "realtek,led0-control", &led0_ctrl);
++	of_property_read_u32(of_node, "realtek,led1-control", &led1_ctrl);
++	of_property_read_u32(of_node, "realtek,led2-control", &led2_ctrl);
++
++	if (led_mode == RTL8211F_LED_MODE_B)
++		val_lcr |= (1<<15);
++
++	if (led0_ctrl <= RTL8211F_LINK1000)
++		val_lcr |= lcr_values[led0_ctrl];
++
++	if (led1_ctrl <= RTL8211F_LINK1000)
++		val_lcr |= (lcr_values[led1_ctrl]<<5);
++
++	if (led2_ctrl <= RTL8211F_LINK1000)
++		val_lcr |= (lcr_values[led2_ctrl]<<10);
++
++	ret = phy_modify_paged_changed(phydev, 0xd04, 0x10,
++	                               RTL8211F_LCR_MASK, val_lcr);
++	if (ret < 0) {
++		dev_err(dev, "Failed to update the LED control register\n");
++		return ret;
++	} else if (ret) {
++		dev_dbg(dev, "Updating LED control register to %x\n", val_lcr);
++	} else {
++		dev_dbg(dev, "LED control was already set to %x by pin-strappings\n",
++		        val_lcr);
++	}
++
+ 	ret = phy_modify_paged_changed(phydev, 0xa43, RTL8211F_PHYCR1,
+ 				       RTL8211F_ALDPS_PLL_OFF | RTL8211F_ALDPS_ENABLE | RTL8211F_ALDPS_XTAL_OFF,
+ 				       priv->phycr1);
+diff --git a/include/dt-bindings/net/realtek-phy-rtl8211f.h b/include/dt-bindings/net/realtek-phy-rtl8211f.h
+new file mode 100644
+index 00000000000..4b6ea549f9c
+--- /dev/null
++++ b/include/dt-bindings/net/realtek-phy-rtl8211f.h
+@@ -0,0 +1,25 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _DT_BINDINGS_REALTEK_PHY_RTL8211F_H
++#define _DT_BINDINGS_REALTEK_PHY_RTL8211F_H
++
++/* LED modes for RTL8211F PHY */
++
++#define RTL8211F_LED_MODE_A 0
++#define RTL8211F_LED_MODE_B 1
++
++#define RTL8211F_LINK10_100_1000_ACT 0
++#define RTL8211F_LINK10_100_1000     1
++#define RTL8211F_LINK10_100_ACT      2
++#define RTL8211F_LINK10_100          3
++#define RTL8211F_LINK10_1000_ACT     4
++#define RTL8211F_LINK10_1000         5
++#define RTL8211F_LINK10_ACT          6
++#define RTL8211F_LINK10              7
++#define RTL8211F_LINK100_1000_ACT    8
++#define RTL8211F_LINK100_1000        9
++#define RTL8211F_LINK100_ACT         10
++#define RTL8211F_LINK100             11
++#define RTL8211F_LINK1000_ACT        12
++#define RTL8211F_LINK1000            13
++
++#endif

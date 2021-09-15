@@ -1,0 +1,26 @@
+diff --git a/drivers/tty/serial/8250/8250_dw.c b/drivers/tty/serial/8250/8250_dw.c
+index 53f57c3b9f4..e3cac73b131 100644
+--- a/drivers/tty/serial/8250/8250_dw.c
++++ b/drivers/tty/serial/8250/8250_dw.c
+@@ -422,9 +422,13 @@ static void dw8250_quirks(struct uart_port *p, struct dw8250_data *data)
+ 		data->uart_16550_compatible = true;
+ 	}
+ 
++	if (has_acpi_companion(p->dev))
++		p->set_termios = dw8250_set_termios;
++
+ 	/* Platforms with iDMA 64-bit */
+ 	if (platform_get_resource_byname(to_platform_device(p->dev),
+ 					 IORESOURCE_MEM, "lpss_priv")) {
++		p->set_termios = dw8250_set_termios;
+ 		data->data.dma.rx_param = p->dev->parent;
+ 		data->data.dma.tx_param = p->dev->parent;
+ 		data->data.dma.fn = dw8250_idma_filter;
+@@ -463,7 +467,6 @@ static int dw8250_probe(struct platform_device *pdev)
+ 	p->serial_in	= dw8250_serial_in;
+ 	p->serial_out	= dw8250_serial_out;
+ 	p->set_ldisc	= dw8250_set_ldisc;
+-	p->set_termios	= dw8250_set_termios;
+ 
+ 	p->membase = devm_ioremap(dev, regs->start, resource_size(regs));
+ 	if (!p->membase)
