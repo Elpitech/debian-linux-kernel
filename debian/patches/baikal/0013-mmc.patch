@@ -1,0 +1,180 @@
+diff --git a/drivers/mmc/host/sdhci-of-dwcmshc.c b/drivers/mmc/host/sdhci-of-dwcmshc.c
+index bac874ab0b3..ea7b01ec5a1 100644
+--- a/drivers/mmc/host/sdhci-of-dwcmshc.c
++++ b/drivers/mmc/host/sdhci-of-dwcmshc.c
+@@ -60,6 +60,8 @@
+ #define BOUNDARY_OK(addr, len) \
+ 	((addr | (SZ_128M - 1)) == ((addr + len - 1) | (SZ_128M - 1)))
+ 
++#define MSHC_INPUT_DIVIDER 2  /* mshc_tx_x2 to mshc_tx divider */
++
+ struct rk3568_priv {
+ 	/* Rockchip specified optional clocks */
+ 	struct clk_bulk_data rockchip_clks[RK3568_MAX_CLKS];
+@@ -98,11 +100,45 @@ static void dwcmshc_adma_write_desc(struct sdhci_host *host, void **desc,
+ static unsigned int dwcmshc_get_max_clock(struct sdhci_host *host)
+ {
+ 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
++	/*
++	TODO: fix min\max clk rate
++	return clk_round_rate(pltfm_host->clk, ULONG_MAX);
++	*/
++	struct mmc_host *mmc = host->mmc;
++	struct device *dev = mmc_dev(mmc);
++	unsigned int ret;
++
++	if (device_property_read_u32(dev, "max-clock", &ret) < 0) {
++		if (pltfm_host->clk)
++			ret = sdhci_pltfm_clk_get_max_clock(host);
++		else if (pltfm_host->clock)
++			ret = pltfm_host->clock;
++		else
++			ret = 1*1000*1000;
++	}
++	return ret;
++}
+ 
+-	if (pltfm_host->clk)
+-		return sdhci_pltfm_clk_get_max_clock(host);
+-	else
+-		return pltfm_host->clock;
++static unsigned int dwcmshc_get_min_clock (struct sdhci_host *host)
++{
++	/*
++	TODO: fix min\max clk rate
++	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
++	return clk_round_rate(pltfm_host->clk, ULONG_MIN);
++	*/
++	return 150*1000;   /* tx2 = (pll=1200MHz)/(div=250*16) = 300/2 = 150KHz */
++}
++
++static void dwcmshc_set_clock(struct sdhci_host *host, unsigned int clock)
++{
++	struct sdhci_pltfm_host *pltfm_host;
++	if (clock == 0) {
++		return;
++	}
++	pltfm_host = sdhci_priv(host);
++	clk_set_rate(pltfm_host->clk, clock * MSHC_INPUT_DIVIDER);
++	host->mmc->actual_clock = clk_get_rate(pltfm_host->clk) / MSHC_INPUT_DIVIDER;
++	sdhci_enable_clk(host, 0);
+ }
+ 
+ static void dwcmshc_check_auto_cmd23(struct mmc_host *mmc,
+@@ -256,10 +292,11 @@ static void dwcmshc_rk3568_set_clock(struct sdhci_host *host, unsigned int clock
+ }
+ 
+ static const struct sdhci_ops sdhci_dwcmshc_ops = {
+-	.set_clock		= sdhci_set_clock,
++	.set_clock		= dwcmshc_set_clock,
+ 	.set_bus_width		= sdhci_set_bus_width,
+ 	.set_uhs_signaling	= dwcmshc_set_uhs_signaling,
+ 	.get_max_clock		= dwcmshc_get_max_clock,
++	.get_min_clock		= dwcmshc_get_min_clock,
+ 	.reset			= sdhci_reset,
+ 	.adma_write_desc	= dwcmshc_adma_write_desc,
+ };
+@@ -276,7 +313,9 @@ static const struct sdhci_ops sdhci_dwcmshc_rk3568_ops = {
+ static const struct sdhci_pltfm_data sdhci_dwcmshc_pdata = {
+ 	.ops = &sdhci_dwcmshc_ops,
+ 	.quirks = SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN,
+-	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
++	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN |
++					SDHCI_QUIRK2_BROKEN_64_BIT_DMA_MASK |
++					SDHCI_QUIRK2_NO_1_8_V,
+ };
+ 
+ static const struct sdhci_pltfm_data sdhci_dwcmshc_rk3568_pdata = {
+@@ -390,6 +429,14 @@ static int dwcmshc_probe(struct platform_device *pdev)
+ 			clk_prepare_enable(priv->bus_clk);
+ 	}
+ 
++	err = clk_prepare_enable(pltfm_host->clk);
++	if (err)
++		goto free_pltfm;
++
++	priv->bus_clk = devm_clk_get(&pdev->dev, "bus");
++	if (!IS_ERR(priv->bus_clk))
++		clk_prepare_enable(priv->bus_clk);
++
+ 	err = mmc_of_parse(host->mmc);
+ 	if (err)
+ 		goto err_clk;
+@@ -468,8 +515,7 @@ static int dwcmshc_suspend(struct device *dev)
+ 		return ret;
+ 
+ 	clk_disable_unprepare(pltfm_host->clk);
+-	if (!IS_ERR(priv->bus_clk))
+-		clk_disable_unprepare(priv->bus_clk);
++	clk_disable_unprepare(priv->bus_clk);
+ 
+ 	if (rk_priv)
+ 		clk_bulk_disable_unprepare(RK3568_MAX_CLKS,
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index fff6c39a343..50524a069b1 100644
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -3198,9 +3198,12 @@ static void sdhci_cmd_irq(struct sdhci_host *host, u32 intmask, u32 *intmask_p)
+ 		 */
+ 		if (host->pending_reset)
+ 			return;
++		/*
++		TODO: fix false positives interrupts on mitx board.
+ 		pr_err("%s: Got command interrupt 0x%08x even though no command operation was in progress.\n",
+ 		       mmc_hostname(host->mmc), (unsigned)intmask);
+ 		sdhci_dumpregs(host);
++		*/
+ 		return;
+ 	}
+ 
+@@ -3956,7 +3959,8 @@ static int sdhci_set_dma_mask(struct sdhci_host *host)
+ 		host->flags &= ~SDHCI_USE_64_BIT_DMA;
+ 
+ 	/* Try 64-bit mask if hardware is capable  of it */
+-	if (host->flags & SDHCI_USE_64_BIT_DMA) {
++	if (!(host->quirks2 & SDHCI_QUIRK2_BROKEN_64_BIT_DMA_MASK) &&
++	     (host->flags & SDHCI_USE_64_BIT_DMA)) {
+ 		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+ 		if (ret) {
+ 			pr_warn("%s: Failed to set 64-bit DMA mask.\n",
+diff --git a/drivers/mmc/host/sdhci.h b/drivers/mmc/host/sdhci.h
+index 074dc182b18..3534f326ea0 100644
+--- a/drivers/mmc/host/sdhci.h
++++ b/drivers/mmc/host/sdhci.h
+@@ -224,6 +224,7 @@
+ #define  SDHCI_SUPPORT_SDR50	0x00000001
+ #define  SDHCI_SUPPORT_SDR104	0x00000002
+ #define  SDHCI_SUPPORT_DDR50	0x00000004
++#define  SDHCI_SUPPORT_UHS2	0x00000008
+ #define  SDHCI_DRIVER_TYPE_A	0x00000010
+ #define  SDHCI_DRIVER_TYPE_C	0x00000020
+ #define  SDHCI_DRIVER_TYPE_D	0x00000040
+@@ -232,6 +233,7 @@
+ #define  SDHCI_RETUNING_MODE_MASK		GENMASK(15, 14)
+ #define  SDHCI_CLOCK_MUL_MASK			GENMASK(23, 16)
+ #define  SDHCI_CAN_DO_ADMA3	0x08000000
++#define  SDHCI_SUPPORT_VDD2_18	0x10000000
+ #define  SDHCI_SUPPORT_HS400	0x80000000 /* Non-standard */
+ 
+ #define SDHCI_MAX_CURRENT		0x48
+@@ -280,6 +282,12 @@
+ #define   SDHCI_SPEC_410	4
+ #define   SDHCI_SPEC_420	5
+ 
++
++#define SDHCI_EMMC_CONTROL	0x52C
++#define  SDHCI_EMMC_TYPE_MMC	(1 << 0)  /* 0-sd,     1-mmc     */
++#define  SDHCI_EMMC_CRC_DISABLE	(1 << 1)  /* 0-enable, 1-disable */
++#define  SDHCI_EMMC_DONT_RESET	(1 << 2)  /* 0-reset,  1-dont    */
++
+ /*
+  * End of controller registers.
+  */
+@@ -476,6 +484,7 @@ struct sdhci_host {
+  * block count.
+  */
+ #define SDHCI_QUIRK2_USE_32BIT_BLK_CNT			(1<<18)
++#define SDHCI_QUIRK2_BROKEN_64_BIT_DMA_MASK		(1<<19)
+ 
+ 	int irq;		/* Device IRQ */
+ 	void __iomem *ioaddr;	/* Mapped address */

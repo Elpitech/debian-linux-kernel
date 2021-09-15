@@ -127,3 +127,20 @@ bugfix/all/bpftool-fix-version-string-in-recursive-builds.patch
 bugfix/all/tools-include-uapi-fix-errno.h.patch
 
 # ABI maintenance
+
+# Baikal patches
+baikal/0000-arch.patch
+baikal/0001-dts.patch
+baikal/0002-clock.patch
+baikal/0003-video.patch
+baikal/0004-hwmon.patch
+baikal/0005-i2c.patch
+baikal/0006-spi.patch
+baikal/0007-input.patch
+baikal/0008-ec.patch
+baikal/0009-net.patch
+baikal/0010-pci.patch
+baikal/0011-usb.patch
+baikal/0012-sound.patch
+baikal/0013-mmc.patch
+baikal/0014-tty.patch

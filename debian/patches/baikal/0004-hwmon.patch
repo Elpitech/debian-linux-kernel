@@ -1,0 +1,2061 @@
+diff --git a/Documentation/hwmon/pvt.rst b/Documentation/hwmon/pvt.rst
+new file mode 100644
+index 00000000000..4e1e9215fcd
+--- /dev/null
++++ b/Documentation/hwmon/pvt.rst
+@@ -0,0 +1,61 @@
++Kernel driver pvt
++==================
++
++Supported chips:
++  * Analog Bits' PVT Sensor in Baikal-M SoC
++    Prefix: 'pvt'
++    Addresses scanned: 0x18 - 0x1a, 0x29 - 0x2b, 0x4c - 0x4e
++    Datasheet:  Analog Bits. PVT Sensor Datasheet. Version: 2014.07.23
++                BE-T-B_M-AS-006-PVT_db.pdf
++
++Author: Maxim Kaurkin <maxim.kaurkin@baikalelectronics.ru>
++
++Description
++-----------
++Analog Bits' PVT Sensor is a highly integrated macro for monitoring process, voltage, and temperature
++variation on-chip, allowing very high precision even in untrimmed usage. It consumes very little power even in
++operational mode, and leakage power only when temperature measurement is complete. An additional voltage
++sample mode is included allowing for supply voltage monitoring, and process monitor mode to assess
++transistor performance. The block includes a simple-to-use digital interface that works with standard core and
++IO level power supplies. The macro uses core and thick-oxide devices.
++
++
++Linux Usage
++-----------
++/ # sensors
++
++pvt-baikal-isa-0000
++Adapter: ISA adapter
++in1:          +0.93 V  (min =  +0.80 V, max =  +1.00 V)
++temp1:        +44.1 C  (low  =  -0.0 C, high = +99.8 C)
++
++
++Some parameters for configuring PVT are placed in sysfs. Temperature in m degC and Voltage in mV.
++/ # ls  /sys/class/hwmon/hwmon1/device/
++RO:
++    name
++    temp1_input
++    in1_input
++    svt_input
++    hvt_input
++    lvt_input
++
++RW:
++    temp1_min
++    temp1_max
++    in1_min
++    in1_max
++    mon_mod
++
++The Temerature (Voltage) can be measured by reading the file temp1_input (in1_input).
++The PVT sensor can be used for monitoring temperature or voltage. You can switch monitoring mod by writing 0 (Temperature, Default) or 1 (Voltage) in file mon_mod.
++If Temperature or Voltage exceed limits which can be set by files temp1_min, temp1_max, in1_min, in1_max then generated the interrupt and in console will appear the message:
++/ # PVT WARNING Hi(Lo) Temperature(Voltage)
++
++
++/ # cat /proc/interrupts
++           CPU0       CPU1
++................................................
++ 23:          1          0  MIPS GIC  23  be-apb
++................................................
++
+diff --git a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
+index e3675377bc5..fb3cdafe8ca 100644
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -459,6 +459,25 @@ config SENSORS_DRIVETEMP
+ 	  This driver can also be built as a module. If so, the module
+ 	  will be called drivetemp.
+ 
++config SENSORS_PVT
++	tristate "Baikal PVT"
++	help
++	  If you say yes here you get support for Baikal PVT single
++	  input temperature sensor chips.
++
++	  This driver can also be built as a module.  If so, the module
++	  will be called pvt.
++
++config SENSORS_BM_MITX
++	tristate "Baikal-M-based Mini-ITX board hardware monitoring"
++	depends on I2C
++	help
++	  If you say yes here you get support for hardware monitoring
++	  features of the Baikal-M-based Mini-ITX board
++
++	  This driver can also be built as a module.  If so, the module
++	  will be called bm_mitx_hwmon.
++
+ config SENSORS_DS620
+ 	tristate "Dallas Semiconductor DS620"
+ 	depends on I2C
+@@ -1809,7 +1828,7 @@ config SENSORS_ADS7871
+ 
+ config SENSORS_AMC6821
+ 	tristate "Texas Instruments AMC6821"
+-	depends on I2C 
++	depends on I2C
+ 	help
+ 	  If you say yes here you get support for the Texas Instruments
+ 	  AMC6821 hardware monitoring chips.
+diff --git a/drivers/hwmon/Makefile b/drivers/hwmon/Makefile
+index 0241ed84b69..110432e1be0 100644
+--- a/drivers/hwmon/Makefile
++++ b/drivers/hwmon/Makefile
+@@ -54,6 +54,7 @@ obj-$(CONFIG_SENSORS_ASPEED)	+= aspeed-pwm-tacho.o
+ obj-$(CONFIG_SENSORS_ATXP1)	+= atxp1.o
+ obj-$(CONFIG_SENSORS_AXI_FAN_CONTROL) += axi-fan-control.o
+ obj-$(CONFIG_SENSORS_BT1_PVT)	+= bt1-pvt.o
++obj-$(CONFIG_SENSORS_BM_MITX)	+= bm_mitx_hwmon.o
+ obj-$(CONFIG_SENSORS_CORETEMP)	+= coretemp.o
+ obj-$(CONFIG_SENSORS_CORSAIR_CPRO) += corsair-cpro.o
+ obj-$(CONFIG_SENSORS_CORSAIR_PSU) += corsair-psu.o
+@@ -181,6 +182,7 @@ obj-$(CONFIG_SENSORS_SPARX5)	+= sparx5-temp.o
+ obj-$(CONFIG_SENSORS_STTS751)	+= stts751.o
+ obj-$(CONFIG_SENSORS_AMC6821)	+= amc6821.o
+ obj-$(CONFIG_SENSORS_TC74)	+= tc74.o
++obj-$(CONFIG_SENSORS_PVT)	+= pvt.o
+ obj-$(CONFIG_SENSORS_THMC50)	+= thmc50.o
+ obj-$(CONFIG_SENSORS_TMP102)	+= tmp102.o
+ obj-$(CONFIG_SENSORS_TMP103)	+= tmp103.o
+@@ -204,4 +206,3 @@ obj-$(CONFIG_SENSORS_OCC)	+= occ/
+ obj-$(CONFIG_PMBUS)		+= pmbus/
+ 
+ ccflags-$(CONFIG_HWMON_DEBUG_CHIP) := -DDEBUG
+-
+diff --git a/drivers/hwmon/bm_mitx_hwmon.c b/drivers/hwmon/bm_mitx_hwmon.c
+new file mode 100644
+index 00000000000..6734c391f15
+--- /dev/null
++++ b/drivers/hwmon/bm_mitx_hwmon.c
+@@ -0,0 +1,1280 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * bm_mitx_hwmon.c - driver for the Baikal-M-based Mini-ITX board
++ *                   hardware monitoring features
++ */
++
++#include <linux/module.h>
++#include <linux/jiffies.h>
++#include <linux/hwmon.h>
++#include <linux/hwmon-sysfs.h>
++#include <linux/i2c.h>
++#include <linux/err.h>
++#include <linux/mutex.h>
++#include <linux/slab.h>
++
++#define MITX_HWMON_VMON_SIZE      2
++#define MITX_HWMON_IMON_SIZE      2
++#define MITX_HWMON_TEMP_SIZE      2
++#define MITX_HWMON_FAN_RPM_SIZE   2
++#define MITX_HWMON_FAN_LVL_SIZE   1
++#define MITX_HWMON_FAN_FREQ_SIZE  2
++#define MITX_HWMON_TEMP_RES       100
++#define MITX_HWMON_FAN_LVL_MAX    100
++#define MITX_HWMON_VMON_CHANNELS  3
++#define MITX_HWMON_IMON_CHANNELS  2
++#define MITX_HWMON_TEMP_CHANNELS  3
++#define MITX_HWMON_FAN_CHANNELS   2
++#define MITX_HWMON_TABLE_SIZE_MAX 8
++#define MITX_HWMON_TMON_CONFIG_SIZE 0x20
++
++/* HWMON registers  */
++#define MITX_HWMON_REG_VEN_ID          0x00
++#define MITX_HWMON_REG_DEV_ID          0x02
++#define MITX_HWMON_REG_CAP             0x04
++#define MITX_HWMON_REG_VMON_BASE       0x11
++#define MITX_HWMON_REG_IMON_BASE       0x19
++#define MITX_HWMON_REG_VLOW_BASE       0x21
++#define MITX_HWMON_REG_ILOW_BASE       0x29
++#define MITX_HWMON_REG_VHIGH_BASE      0x31
++#define MITX_HWMON_REG_IHIGH_BASE      0x39
++#define MITX_HWMON_REG_VMON(n)         (MITX_HWMON_REG_VMON_BASE + \
++					(n) * MITX_HWMON_VMON_SIZE)
++#define MITX_HWMON_REG_IMON(n)         (MITX_HWMON_REG_IMON_BASE + \
++					(n) * MITX_HWMON_IMON_SIZE)
++#define MITX_HWMON_REG_VLOW(n)         (MITX_HWMON_REG_VLOW_BASE + \
++					(n) * MITX_HWMON_VMON_SIZE)
++#define MITX_HWMON_REG_ILOW(n)         (MITX_HWMON_REG_ILOW_BASE + \
++					(n) * MITX_HWMON_IMON_SIZE)
++#define MITX_HWMON_REG_VHIGH(n)        (MITX_HWMON_REG_VHIGH_BASE + \
++					(n) * MITX_HWMON_VMON_SIZE)
++#define MITX_HWMON_REG_IHIGH(n)        (MITX_HWMON_REG_IHIGH_BASE + \
++					(n) * MITX_HWMON_IMON_SIZE)
++#define MITX_HWMON_REG_TEMP_BASE       0x41
++#define MITX_HWMON_REG_TCRIT_BASE      0x47
++#define MITX_HWMON_REG_TLOW_BASE       0x51
++#define MITX_HWMON_REG_THIGH_BASE      0x57
++#define MITX_HWMON_REG_TEMP(n)         (MITX_HWMON_REG_TEMP_BASE + \
++					(n) * MITX_HWMON_TEMP_SIZE)
++#define MITX_HWMON_REG_TLOW(n)         (MITX_HWMON_REG_TLOW_BASE + \
++					(n) * MITX_HWMON_TEMP_SIZE)
++#define MITX_HWMON_REG_THIGH(n)        (MITX_HWMON_REG_THIGH_BASE + \
++					(n) * MITX_HWMON_TEMP_SIZE)
++#define MITX_HWMON_REG_TCRIT(n)        (MITX_HWMON_REG_TCRIT_BASE + \
++					(n) * MITX_HWMON_TEMP_SIZE)
++#define MITX_HWMON_REG_TMON_CONTROL    0x40
++#define MITX_HWMON_REG_FAN_RPM_BASE    0x61
++#define MITX_HWMON_REG_FAN_LVL_BASE    0x71
++#define MITX_HWMON_REG_FAN_FREQ_BASE   0x75
++#define MITX_HWMON_REG_FAN_RPM(n)      (MITX_HWMON_REG_FAN_RPM_BASE + \
++					(n) * MITX_HWMON_FAN_RPM_SIZE)
++#define MITX_HWMON_REG_FAN_LVL(n)      (MITX_HWMON_REG_FAN_LVL_BASE + \
++					(n) * MITX_HWMON_FAN_LVL_SIZE)
++#define MITX_HWMON_REG_FAN_FREQ(n)     (MITX_HWMON_REG_FAN_FREQ_BASE + \
++					(n) * MITX_HWMON_FAN_FREQ_SIZE)
++#define MITX_HWMON_REG_TMON_CONFIG_TEMP_BASE    0x90
++#define MITX_HWMON_REG_TMON_CONFIG_SPEED_BASE   0xA0
++#define MITX_HWMON_REG_TMON_CONFIG_HYST_BASE    0xAC
++#define MITX_HWMON_REG_TMON_CONFIG_SIZE_BASE    0xAE
++#define MITX_HWMON_REG_TMON_CONFIG_TEMP(id, n)  \
++				(MITX_HWMON_REG_TMON_CONFIG_TEMP_BASE + \
++				(id) * MITX_HWMON_TMON_CONFIG_SIZE + \
++				(n) * MITX_HWMON_TEMP_SIZE)
++#define MITX_HWMON_REG_TMON_CONFIG_SPEED(id, n) \
++				(MITX_HWMON_REG_TMON_CONFIG_SPEED_BASE + \
++				(id) * MITX_HWMON_TMON_CONFIG_SIZE + \
++				(n) * MITX_HWMON_FAN_LVL_SIZE)
++#define MITX_HWMON_REG_TMON_CONFIG_HYST(id)     \
++				(MITX_HWMON_REG_TMON_CONFIG_HYST_BASE + \
++				(id) * MITX_HWMON_TMON_CONFIG_SIZE)
++#define MITX_HWMON_REG_TMON_CONFIG_SIZE(id)     \
++				(MITX_HWMON_REG_TMON_CONFIG_SIZE_BASE + \
++				(id) * MITX_HWMON_TMON_CONFIG_SIZE)
++
++#define MITX_HWMON_REG_VEN_ID_TPL            0xCCED
++#define MITX_HWMON_REG_DEV_ID_MITX_HWMON     0xA007
++#define MITX_HWMON_REG_CAP_POWER             0x01
++#define MITX_HWMON_REG_CAP_TMON              0x02
++#define MITX_HWMON_REG_CAP_TMON_CONFIG       0x04
++#define MITX_HWMON_REG_CAP_FANCTL            0x08
++#define MITX_HWMON_REG_TMON_CONTROL_ACTIVE   0x01
++#define MITX_HWMON_REG_TMON_CONTROL_STATE    0x0F
++#define MITX_HWMON_REG_TMON_CONTROL_OP       0xF0
++#define MITX_HWMON_REG_TMON_CONTROL_OP_LOAD  0x10
++#define MITX_HWMON_REG_TMON_CONTROL_OP_STORE 0x30
++
++/*
++ * Data structures and manipulation thereof
++ */
++
++#define MITX_HWMON_TMON_TABLE_ID(x) (((x) >> 4) & 0x0F)
++#define MITX_HWMON_TMON_TABLE_VALUE_INDEX(x) ((x) & 0x0F)
++#define MITX_HWMON_TMON_DEV_INDEX(id, idx) (((id) << 4) | ((idx) & 0x0F))
++
++#define MITX_HWMON_VALUE_TYPE(type) \
++struct bm_mitx_hwmon_##type { \
++	type value; \
++	type low; \
++	type high; \
++	type crit; \
++}
++
++MITX_HWMON_VALUE_TYPE(u16);
++MITX_HWMON_VALUE_TYPE(s16);
++
++struct bm_mitx_hwmon_fan_data {
++	struct bm_mitx_hwmon_u16 rpm;
++	u16 freq;
++	u8 speed;
++};
++
++struct bm_mitx_hwmon_tmon_table_value {
++	s16 temp;
++	u8 speed;
++};
++
++struct bm_mitx_hwmon_tmon_table {
++	u8 size;
++	s16 hysteresis;
++	struct bm_mitx_hwmon_tmon_table_value value[MITX_HWMON_TABLE_SIZE_MAX];
++};
++
++struct bm_mitx_hwmon_tmon_data {
++	u8 control;
++	struct bm_mitx_hwmon_tmon_table table[MITX_HWMON_FAN_CHANNELS];
++};
++
++struct bm_mitx_hwmon_data {
++	unsigned short addr;
++	struct device *hwmon_dev;
++
++	const char *name;
++	struct mutex update_lock; /* protect register access */
++	char valid;
++	unsigned long last_updated;	/* In jiffies */
++	unsigned long last_limits;	/* In jiffies */
++
++	/* Register values */
++	u8 caps;
++	struct bm_mitx_hwmon_u16 vmon[MITX_HWMON_VMON_CHANNELS];
++	struct bm_mitx_hwmon_u16 imon[MITX_HWMON_IMON_CHANNELS];
++	struct bm_mitx_hwmon_s16 temp[MITX_HWMON_TEMP_CHANNELS];
++	struct bm_mitx_hwmon_fan_data fan[MITX_HWMON_FAN_CHANNELS];
++	struct bm_mitx_hwmon_tmon_data tmon;
++};
++
++static bool extended_attrs;
++
++static u8 bm_mitx_hwmon_read_byte(struct i2c_client *client, u8 reg)
++{
++	s32 result = i2c_smbus_read_byte_data(client, reg);
++
++	if (result < 0) {
++		dev_err(&client->dev, "read byte failed: %d", result);
++		result = 0;
++	}
++	return result;
++}
++
++static u16 bm_mitx_hwmon_read_word(struct i2c_client *client, u8 reg)
++{
++	s32 result = i2c_smbus_read_word_data(client, reg);
++
++	if (result < 0) {
++		dev_err(&client->dev, "read word failed: %d", result);
++		result = 0;
++	}
++	return result;
++}
++
++static void bm_mitx_hwmon_write_byte(struct i2c_client *client,
++		u8 reg, u8 data)
++{
++	s32 result = i2c_smbus_write_byte_data(client, reg, data);
++
++	if (result < 0)
++		dev_err(&client->dev, "write byte failed: %d", result);
++}
++
++static void bm_mitx_hwmon_write_word(struct i2c_client *client,
++		u8 reg, u16 data)
++{
++	s32 result = i2c_smbus_write_word_data(client, reg, data);
++
++	if (result < 0)
++		dev_err(&client->dev, "write word failed: %d", result);
++}
++
++static void bm_mitx_hwmon_update_temp_thresholds(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->temp); index++) {
++		data->temp[index].crit = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_TCRIT(index));
++		data->temp[index].high = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_THIGH(index));
++		data->temp[index].low = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_TLOW(index));
++	}
++}
++
++static void bm_mitx_hwmon_update_vmon_thresholds(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->vmon); index++) {
++		data->vmon[index].high = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_VHIGH(index));
++		data->vmon[index].low = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_VLOW(index));
++	}
++}
++
++static void bm_mitx_hwmon_update_imon_thresholds(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->imon); index++) {
++		data->imon[index].high = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_IHIGH(index));
++		data->imon[index].low = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_ILOW(index));
++	}
++}
++
++static void bm_mitx_hwmon_update_temp(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->temp); index++) {
++		data->temp[index].value = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_TEMP(index));
++	}
++}
++
++static void bm_mitx_hwmon_update_fan(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->fan); index++) {
++		data->fan[index].freq = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_FAN_FREQ(index));
++		data->fan[index].speed = bm_mitx_hwmon_read_byte(client,
++			MITX_HWMON_REG_FAN_LVL(index));
++		data->fan[index].rpm.value = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_FAN_RPM(index));
++	}
++}
++
++static void bm_mitx_hwmon_update_vmon(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->vmon); index++) {
++		data->vmon[index].value = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_VMON(index));
++	}
++}
++
++static void bm_mitx_hwmon_update_imon(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->imon); index++) {
++		data->imon[index].value = bm_mitx_hwmon_read_word(client,
++			MITX_HWMON_REG_IMON(index));
++	}
++}
++
++static void bm_mitx_hwmon_update_tmon_table_value(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data, size_t id)
++{
++	size_t index;
++
++	for (index = 0;
++	index < ARRAY_SIZE(data->tmon.table[id].value);
++	index++) {
++		data->tmon.table[id].value[index].temp =
++			bm_mitx_hwmon_read_word(client,
++				MITX_HWMON_REG_TMON_CONFIG_TEMP(id, index));
++		data->tmon.table[id].value[index].speed =
++			bm_mitx_hwmon_read_byte(client,
++				MITX_HWMON_REG_TMON_CONFIG_SPEED(id, index));
++	}
++}
++
++static void bm_mitx_hwmon_update_tmon_tables(struct i2c_client *client,
++				struct bm_mitx_hwmon_data *data)
++{
++	size_t index;
++
++	for (index = 0; index < ARRAY_SIZE(data->tmon.table); index++) {
++		data->tmon.table[index].size = bm_mitx_hwmon_read_byte(client,
++				MITX_HWMON_REG_TMON_CONFIG_SIZE(index));
++		data->tmon.table[index].hysteresis =
++			bm_mitx_hwmon_read_word(client,
++				MITX_HWMON_REG_TMON_CONFIG_HYST(index));
++		bm_mitx_hwmon_update_tmon_table_value(client, data, index);
++	}
++}
++
++static struct bm_mitx_hwmon_data *bm_mitx_hwmon_update_device(
++		struct device *dev)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++
++	mutex_lock(&data->update_lock);
++
++	/* Limit registers cache is refreshed after 60 seconds */
++	if (time_after(jiffies, data->last_limits + 60 * HZ)
++		|| !data->valid) {
++		bm_mitx_hwmon_update_temp_thresholds(client, data);
++		if (data->caps & MITX_HWMON_REG_CAP_POWER) {
++			bm_mitx_hwmon_update_vmon_thresholds(client, data);
++			bm_mitx_hwmon_update_imon_thresholds(client, data);
++		}
++		if (data->caps & MITX_HWMON_REG_CAP_TMON_CONFIG)
++			bm_mitx_hwmon_update_tmon_tables(client, data);
++		data->last_limits = jiffies;
++	}
++
++	/* Measurement registers cache is refreshed after 2 second */
++	if (time_after(jiffies, data->last_updated + 2 * HZ)
++		|| !data->valid) {
++		bm_mitx_hwmon_update_temp(client, data);
++		bm_mitx_hwmon_update_fan(client, data);
++		if (data->caps & MITX_HWMON_REG_CAP_POWER) {
++			bm_mitx_hwmon_update_vmon(client, data);
++			bm_mitx_hwmon_update_imon(client, data);
++		}
++		data->tmon.control = bm_mitx_hwmon_read_byte(client,
++			MITX_HWMON_REG_TMON_CONTROL);
++		data->last_updated = jiffies;
++		data->valid = 1;
++	}
++
++	mutex_unlock(&data->update_lock);
++	return data;
++}
++
++static bool auto_mode_enabled(u8 control)
++{
++	return (control & MITX_HWMON_REG_TMON_CONTROL_ACTIVE) != 0;
++}
++
++static ssize_t show_pwm(struct device *dev, struct device_attribute
++		*attr, char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->fan[nr].speed);
++}
++
++static ssize_t set_pwm(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	if (auto_mode_enabled(data->tmon.control))
++		return -EINVAL;
++
++	val = clamp_val(val, 0, MITX_HWMON_FAN_LVL_MAX);
++	mutex_lock(&data->update_lock);
++	data->fan[nr].speed = val;
++	bm_mitx_hwmon_write_byte(client, MITX_HWMON_REG_FAN_LVL(nr),
++		data->fan[nr].speed);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t show_pwm_auto(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%d\n",
++		auto_mode_enabled(data->tmon.control) ? 1 : 0);
++}
++
++static int set_pwm_auto_direct(struct i2c_client *client, int nr, int val)
++{
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	u8 control;
++
++	if (val < 0 || val > 1)
++		return -EINVAL;
++
++	control = bm_mitx_hwmon_read_byte(client, MITX_HWMON_REG_TMON_CONTROL);
++	control &= ~MITX_HWMON_REG_TMON_CONTROL_ACTIVE;
++	switch (val) {
++	case 0: /* PWM */
++		data->fan[nr].speed = MITX_HWMON_FAN_LVL_MAX;
++		break;
++	case 1: /* AUTOMATIC */
++		control |= MITX_HWMON_REG_TMON_CONTROL_ACTIVE;
++		break;
++	}
++
++	bm_mitx_hwmon_write_byte(client, MITX_HWMON_REG_TMON_CONTROL, control);
++	data->tmon.control = control;
++	if (val == 0)
++		bm_mitx_hwmon_write_byte(client, MITX_HWMON_REG_FAN_LVL(nr),
++				data->fan[nr].speed);
++	return 0;
++}
++
++static ssize_t set_pwm_auto(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	mutex_lock(&data->update_lock);
++	err = set_pwm_auto_direct(client, nr, val);
++	mutex_unlock(&data->update_lock);
++	return err ? err : count;
++}
++
++static ssize_t show_vmon(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->vmon[nr].value);
++}
++
++static ssize_t show_vmon_max(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->vmon[nr].high);
++}
++
++static ssize_t show_vmon_min(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->vmon[nr].low);
++}
++
++static ssize_t set_vmon_max(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(val, 0, U16_MAX);
++	mutex_lock(&data->update_lock);
++	data->vmon[nr].high = val;
++	bm_mitx_hwmon_write_word(client, MITX_HWMON_REG_VHIGH(nr),
++		data->vmon[nr].high);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t set_vmon_min(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(val, 0, U16_MAX);
++	mutex_lock(&data->update_lock);
++	data->vmon[nr].low = val;
++	bm_mitx_hwmon_write_word(client, MITX_HWMON_REG_VLOW(nr),
++		data->vmon[nr].low);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t show_imon(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->imon[nr].value);
++}
++
++static ssize_t show_imon_max(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->imon[nr].high);
++}
++
++static ssize_t show_imon_min(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->imon[nr].low);
++}
++
++static ssize_t set_imon_max(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(val, 0, U16_MAX);
++	mutex_lock(&data->update_lock);
++	data->imon[nr].high = val;
++	bm_mitx_hwmon_write_word(client, MITX_HWMON_REG_IHIGH(nr),
++		data->imon[nr].high);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t set_imon_min(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(val, 0, U16_MAX);
++	mutex_lock(&data->update_lock);
++	data->imon[nr].low = val;
++	bm_mitx_hwmon_write_word(client, MITX_HWMON_REG_ILOW(nr),
++		data->imon[nr].low);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++#define TEMP_FROM_REG(val)   (s32)((val) * 1000 / MITX_HWMON_TEMP_RES)
++#define TEMP_TO_REG(val)     (s32)((val) * MITX_HWMON_TEMP_RES / 1000)
++
++static ssize_t show_temp(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%d\n", TEMP_FROM_REG(data->temp[nr].value));
++}
++
++static ssize_t show_temp_crit(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%d\n", TEMP_FROM_REG(data->temp[nr].crit));
++}
++
++static ssize_t show_temp_max(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%d\n", TEMP_FROM_REG(data->temp[nr].high));
++}
++
++static ssize_t show_temp_min(struct device *dev, struct device_attribute *attr,
++		char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%d\n", TEMP_FROM_REG(data->temp[nr].low));
++}
++
++static ssize_t set_temp_crit(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(TEMP_TO_REG(val), S16_MIN, S16_MAX);
++	mutex_lock(&data->update_lock);
++	data->temp[nr].crit = val;
++	bm_mitx_hwmon_write_word(client, MITX_HWMON_REG_TCRIT(nr),
++		data->temp[nr].crit);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t set_temp_max(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(TEMP_TO_REG(val), S16_MIN, S16_MAX);
++	mutex_lock(&data->update_lock);
++	data->temp[nr].high = val;
++	bm_mitx_hwmon_write_word(client, MITX_HWMON_REG_THIGH(nr),
++		data->temp[nr].high);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t set_temp_min(struct device *dev, struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(TEMP_TO_REG(val), S16_MIN, S16_MAX);
++	mutex_lock(&data->update_lock);
++	data->temp[nr].low = val;
++	bm_mitx_hwmon_write_word(client, MITX_HWMON_REG_TLOW(nr),
++		data->temp[nr].low);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t show_temp_table_size(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	size_t id = MITX_HWMON_TMON_TABLE_ID(to_sensor_dev_attr(attr)->index);
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->tmon.table[id].size);
++}
++
++static ssize_t set_temp_table_size(struct device *dev,
++		struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	size_t id = MITX_HWMON_TMON_TABLE_ID(to_sensor_dev_attr(attr)->index);
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(val, 0, ARRAY_SIZE(data->tmon.table[id].value));
++	mutex_lock(&data->update_lock);
++	data->tmon.table[id].size = val;
++	bm_mitx_hwmon_write_byte(client,
++		MITX_HWMON_REG_TMON_CONFIG_SIZE(id),
++		data->tmon.table[id].size);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t show_temp_table_hysteresis(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	size_t id = MITX_HWMON_TMON_TABLE_ID(to_sensor_dev_attr(attr)->index);
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%d\n",
++		TEMP_FROM_REG(data->tmon.table[id].hysteresis));
++}
++
++static ssize_t set_temp_table_hysteresis(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	size_t id = MITX_HWMON_TMON_TABLE_ID(to_sensor_dev_attr(attr)->index);
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(TEMP_TO_REG(val), S16_MIN, S16_MAX);
++	mutex_lock(&data->update_lock);
++	data->tmon.table[id].hysteresis = val;
++	bm_mitx_hwmon_write_word(client,
++		MITX_HWMON_REG_TMON_CONFIG_HYST(id),
++		data->tmon.table[id].hysteresis);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t show_temp_table_value_temp(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	size_t id = MITX_HWMON_TMON_TABLE_ID(nr);
++	size_t index = MITX_HWMON_TMON_TABLE_VALUE_INDEX(nr);
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%d\n",
++			TEMP_FROM_REG(data->tmon.table[id].value[index].temp));
++}
++
++static ssize_t set_temp_table_value_temp(struct device *dev,
++		struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	size_t id = MITX_HWMON_TMON_TABLE_ID(nr);
++	size_t index = MITX_HWMON_TMON_TABLE_VALUE_INDEX(nr);
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(TEMP_TO_REG(val), S16_MIN, S16_MAX);
++	mutex_lock(&data->update_lock);
++	data->tmon.table[id].value[index].temp = val;
++	bm_mitx_hwmon_write_word(client,
++		MITX_HWMON_REG_TMON_CONFIG_TEMP(id, index),
++		data->tmon.table[id].value[index].temp);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t show_temp_table_value_speed(struct device *dev,
++		struct device_attribute *attr, char *buf)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	size_t id = MITX_HWMON_TMON_TABLE_ID(nr);
++	size_t index = MITX_HWMON_TMON_TABLE_VALUE_INDEX(nr);
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev);
++
++	return sprintf(buf, "%u\n", data->tmon.table[id].value[index].speed);
++}
++
++static ssize_t set_temp_table_value_speed(struct device *dev,
++		struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	int nr = to_sensor_dev_attr(attr)->index;
++	size_t id = MITX_HWMON_TMON_TABLE_ID(nr);
++	size_t index = MITX_HWMON_TMON_TABLE_VALUE_INDEX(nr);
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	unsigned long val;
++	int err;
++
++	err = kstrtoul(buf, 10, &val);
++	if (err < 0)
++		return err;
++
++	val = clamp_val(val, 0, MITX_HWMON_FAN_LVL_MAX);
++	mutex_lock(&data->update_lock);
++	data->tmon.table[id].value[index].speed = val;
++	bm_mitx_hwmon_write_byte(client,
++		MITX_HWMON_REG_TMON_CONFIG_SPEED(id, index),
++		data->tmon.table[id].value[index].speed);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t set_config_load(struct device *dev,
++		struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	u8 val = data->tmon.control;
++
++	val &= ~MITX_HWMON_REG_TMON_CONTROL_OP;
++	val |= MITX_HWMON_REG_TMON_CONTROL_OP_LOAD;
++	mutex_lock(&data->update_lock);
++	bm_mitx_hwmon_write_byte(client, MITX_HWMON_REG_TMON_CONTROL, val);
++	/* Configuration values have been reset, so we ought to try and
++	 * update cached ones as soon as we get a chance
++	 */
++	data->last_limits = 0;
++	data->last_updated = 0;
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++static ssize_t set_config_save(struct device *dev,
++		struct device_attribute *attr,
++		const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++	u8 val = data->tmon.control;
++
++	val &= ~MITX_HWMON_REG_TMON_CONTROL_OP;
++	val |= MITX_HWMON_REG_TMON_CONTROL_OP_STORE;
++	mutex_lock(&data->update_lock);
++	bm_mitx_hwmon_write_byte(client, MITX_HWMON_REG_TMON_CONTROL, val);
++	mutex_unlock(&data->update_lock);
++	return count;
++}
++
++#define show_fan_rpm(thing) \
++static ssize_t show_fan_rpm_##thing(struct device *dev, \
++		struct device_attribute *attr, char *buf) \
++{ \
++	int nr = to_sensor_dev_attr(attr)->index; \
++	struct bm_mitx_hwmon_data *data = bm_mitx_hwmon_update_device(dev); \
++	return sprintf(buf, "%u\n", data->fan[nr].rpm.thing); \
++}
++
++show_fan_rpm(value);
++
++static SENSOR_DEVICE_ATTR(in0_input, S_IRUGO, show_vmon, NULL, 0);
++static SENSOR_DEVICE_ATTR(in0_max, S_IRUGO|S_IWUSR,
++	show_vmon_max, set_vmon_max, 0);
++static SENSOR_DEVICE_ATTR(in0_min, S_IRUGO|S_IWUSR,
++	show_vmon_min, set_vmon_min, 0);
++static SENSOR_DEVICE_ATTR(in1_input, S_IRUGO, show_vmon, NULL, 1);
++static SENSOR_DEVICE_ATTR(in1_max, S_IRUGO|S_IWUSR,
++	show_vmon_max, set_vmon_max, 1);
++static SENSOR_DEVICE_ATTR(in1_min, S_IRUGO|S_IWUSR,
++	show_vmon_min, set_vmon_min, 1);
++static SENSOR_DEVICE_ATTR(in2_input, S_IRUGO, show_vmon, NULL, 2);
++static SENSOR_DEVICE_ATTR(in2_max, S_IRUGO|S_IWUSR,
++	show_vmon_max, set_vmon_max, 2);
++static SENSOR_DEVICE_ATTR(in2_min, S_IRUGO|S_IWUSR,
++	show_vmon_min, set_vmon_min, 2);
++static SENSOR_DEVICE_ATTR(in3_input, S_IRUGO, show_imon, NULL, 0);
++static SENSOR_DEVICE_ATTR(in3_max, S_IRUGO|S_IWUSR,
++	show_imon_max, set_imon_max, 0);
++static SENSOR_DEVICE_ATTR(in3_min, S_IRUGO|S_IWUSR,
++	show_imon_min, set_imon_min, 0);
++static SENSOR_DEVICE_ATTR(in4_input, S_IRUGO, show_imon, NULL, 1);
++static SENSOR_DEVICE_ATTR(in4_max, S_IRUGO|S_IWUSR,
++	show_imon_max, set_imon_max, 1);
++static SENSOR_DEVICE_ATTR(in4_min, S_IRUGO|S_IWUSR,
++	show_imon_min, set_imon_min, 1);
++static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_temp, NULL, 0);
++static SENSOR_DEVICE_ATTR(temp1_crit, S_IRUGO|S_IWUSR,
++	show_temp_crit, set_temp_crit, 0);
++static SENSOR_DEVICE_ATTR(temp1_max, S_IRUGO|S_IWUSR,
++	show_temp_max, set_temp_max, 0);
++static SENSOR_DEVICE_ATTR(temp1_min, S_IRUGO|S_IWUSR,
++	show_temp_min, set_temp_min, 0);
++static SENSOR_DEVICE_ATTR(temp2_input, S_IRUGO, show_temp, NULL, 1);
++static SENSOR_DEVICE_ATTR(temp2_crit, S_IRUGO|S_IWUSR,
++	show_temp_crit, set_temp_crit, 1);
++static SENSOR_DEVICE_ATTR(temp2_max, S_IRUGO|S_IWUSR,
++	show_temp_max, set_temp_max, 1);
++static SENSOR_DEVICE_ATTR(temp2_min, S_IRUGO|S_IWUSR,
++	show_temp_min, set_temp_min, 1);
++static SENSOR_DEVICE_ATTR(temp3_input, S_IRUGO, show_temp, NULL, 2);
++static SENSOR_DEVICE_ATTR(temp3_crit, S_IRUGO|S_IWUSR,
++	show_temp_crit, set_temp_crit, 2);
++static SENSOR_DEVICE_ATTR(temp3_max, S_IRUGO|S_IWUSR,
++	show_temp_max, set_temp_max, 2);
++static SENSOR_DEVICE_ATTR(temp3_min, S_IRUGO|S_IWUSR,
++	show_temp_min, set_temp_min, 2);
++static SENSOR_DEVICE_ATTR(fan1_input, S_IRUGO, show_fan_rpm_value, NULL, 0);
++static SENSOR_DEVICE_ATTR(fan2_input, S_IRUGO, show_fan_rpm_value, NULL, 1);
++static SENSOR_DEVICE_ATTR(pwm1, S_IRUGO|S_IWUSR,
++	show_pwm, set_pwm, 0);
++static SENSOR_DEVICE_ATTR(pwm1_mode, S_IRUGO|S_IWUSR,
++	show_pwm_auto, set_pwm_auto, 0);
++static SENSOR_DEVICE_ATTR(pwm2, S_IRUGO | S_IWUSR,
++	show_pwm, set_pwm, 1);
++static SENSOR_DEVICE_ATTR(pwm2_mode, S_IRUGO|S_IWUSR,
++	show_pwm_auto, set_pwm_auto, 1);
++
++static SENSOR_DEVICE_ATTR(config_load, S_IWUSR, NULL, set_config_load, 0);
++static SENSOR_DEVICE_ATTR(config_save, S_IWUSR, NULL, set_config_save, 0);
++
++static SENSOR_DEVICE_ATTR(table1_size, S_IRUGO|S_IWUSR,
++	show_temp_table_size, set_temp_table_size,
++	MITX_HWMON_TMON_DEV_INDEX(0, 0));
++static SENSOR_DEVICE_ATTR(table1_hyst, S_IRUGO|S_IWUSR,
++	show_temp_table_hysteresis, set_temp_table_hysteresis,
++	MITX_HWMON_TMON_DEV_INDEX(0, 0));
++static SENSOR_DEVICE_ATTR(table1_temp1, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 0));
++static SENSOR_DEVICE_ATTR(table1_pwm1, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 0));
++static SENSOR_DEVICE_ATTR(table1_temp2, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 1));
++static SENSOR_DEVICE_ATTR(table1_pwm2, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 1));
++static SENSOR_DEVICE_ATTR(table1_temp3, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 2));
++static SENSOR_DEVICE_ATTR(table1_pwm3, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 2));
++static SENSOR_DEVICE_ATTR(table1_temp4, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 3));
++static SENSOR_DEVICE_ATTR(table1_pwm4, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 3));
++static SENSOR_DEVICE_ATTR(table1_temp5, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 4));
++static SENSOR_DEVICE_ATTR(table1_pwm5, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 4));
++static SENSOR_DEVICE_ATTR(table1_temp6, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 5));
++static SENSOR_DEVICE_ATTR(table1_pwm6, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 5));
++static SENSOR_DEVICE_ATTR(table1_temp7, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 6));
++static SENSOR_DEVICE_ATTR(table1_pwm7, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 6));
++static SENSOR_DEVICE_ATTR(table1_temp8, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(0, 7));
++static SENSOR_DEVICE_ATTR(table1_pwm8, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(0, 7));
++static SENSOR_DEVICE_ATTR(table2_size, S_IRUGO|S_IWUSR,
++	show_temp_table_size, set_temp_table_size,
++	MITX_HWMON_TMON_DEV_INDEX(1, 0));
++static SENSOR_DEVICE_ATTR(table2_hyst, S_IRUGO|S_IWUSR,
++	show_temp_table_hysteresis, set_temp_table_hysteresis,
++	MITX_HWMON_TMON_DEV_INDEX(1, 0));
++static SENSOR_DEVICE_ATTR(table2_temp1, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 0));
++static SENSOR_DEVICE_ATTR(table2_pwm1, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 0));
++static SENSOR_DEVICE_ATTR(table2_temp2, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 1));
++static SENSOR_DEVICE_ATTR(table2_pwm2, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 1));
++static SENSOR_DEVICE_ATTR(table2_temp3, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 2));
++static SENSOR_DEVICE_ATTR(table2_pwm3, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 2));
++static SENSOR_DEVICE_ATTR(table2_temp4, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 3));
++static SENSOR_DEVICE_ATTR(table2_pwm4, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 3));
++static SENSOR_DEVICE_ATTR(table2_temp5, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 4));
++static SENSOR_DEVICE_ATTR(table2_pwm5, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 4));
++static SENSOR_DEVICE_ATTR(table2_temp6, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 5));
++static SENSOR_DEVICE_ATTR(table2_pwm6, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 5));
++static SENSOR_DEVICE_ATTR(table2_temp7, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 6));
++static SENSOR_DEVICE_ATTR(table2_pwm7, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 6));
++static SENSOR_DEVICE_ATTR(table2_temp8, S_IRUGO|S_IWUSR,
++	show_temp_table_value_temp, set_temp_table_value_temp,
++	MITX_HWMON_TMON_DEV_INDEX(1, 7));
++static SENSOR_DEVICE_ATTR(table2_pwm8, S_IRUGO|S_IWUSR,
++	show_temp_table_value_speed, set_temp_table_value_speed,
++	MITX_HWMON_TMON_DEV_INDEX(1, 7));
++
++static struct attribute *bm_mitx_hwmon_attributes[] = {
++	&sensor_dev_attr_temp1_input.dev_attr.attr,
++	&sensor_dev_attr_temp1_crit.dev_attr.attr,
++	&sensor_dev_attr_temp1_max.dev_attr.attr,
++	&sensor_dev_attr_temp1_min.dev_attr.attr,
++	&sensor_dev_attr_temp2_input.dev_attr.attr,
++	&sensor_dev_attr_temp2_crit.dev_attr.attr,
++	&sensor_dev_attr_temp2_max.dev_attr.attr,
++	&sensor_dev_attr_temp2_min.dev_attr.attr,
++	&sensor_dev_attr_temp3_input.dev_attr.attr,
++	&sensor_dev_attr_temp3_crit.dev_attr.attr,
++	&sensor_dev_attr_temp3_max.dev_attr.attr,
++	&sensor_dev_attr_temp3_min.dev_attr.attr,
++	&sensor_dev_attr_fan1_input.dev_attr.attr,
++	&sensor_dev_attr_fan2_input.dev_attr.attr,
++	&sensor_dev_attr_pwm1.dev_attr.attr,
++	&sensor_dev_attr_pwm1_mode.dev_attr.attr,
++	&sensor_dev_attr_pwm2.dev_attr.attr,
++	&sensor_dev_attr_pwm2_mode.dev_attr.attr,
++	&sensor_dev_attr_in0_input.dev_attr.attr,
++	&sensor_dev_attr_in0_max.dev_attr.attr,
++	&sensor_dev_attr_in0_min.dev_attr.attr,
++	&sensor_dev_attr_in1_input.dev_attr.attr,
++	&sensor_dev_attr_in1_max.dev_attr.attr,
++	&sensor_dev_attr_in1_min.dev_attr.attr,
++	&sensor_dev_attr_in2_input.dev_attr.attr,
++	&sensor_dev_attr_in2_max.dev_attr.attr,
++	&sensor_dev_attr_in2_min.dev_attr.attr,
++	&sensor_dev_attr_in3_input.dev_attr.attr,
++	&sensor_dev_attr_in3_max.dev_attr.attr,
++	&sensor_dev_attr_in3_min.dev_attr.attr,
++	&sensor_dev_attr_in4_input.dev_attr.attr,
++	&sensor_dev_attr_in4_max.dev_attr.attr,
++	&sensor_dev_attr_in4_min.dev_attr.attr,
++	NULL
++};
++
++static struct attribute *bm_mitx_hwmon_attributes_extended[] = {
++	&sensor_dev_attr_temp1_input.dev_attr.attr,
++	&sensor_dev_attr_temp1_crit.dev_attr.attr,
++	&sensor_dev_attr_temp1_max.dev_attr.attr,
++	&sensor_dev_attr_temp1_min.dev_attr.attr,
++	&sensor_dev_attr_temp2_input.dev_attr.attr,
++	&sensor_dev_attr_temp2_crit.dev_attr.attr,
++	&sensor_dev_attr_temp2_max.dev_attr.attr,
++	&sensor_dev_attr_temp2_min.dev_attr.attr,
++	&sensor_dev_attr_temp3_input.dev_attr.attr,
++	&sensor_dev_attr_temp3_crit.dev_attr.attr,
++	&sensor_dev_attr_temp3_max.dev_attr.attr,
++	&sensor_dev_attr_temp3_min.dev_attr.attr,
++	&sensor_dev_attr_fan1_input.dev_attr.attr,
++	&sensor_dev_attr_fan2_input.dev_attr.attr,
++	&sensor_dev_attr_pwm1.dev_attr.attr,
++	&sensor_dev_attr_pwm1_mode.dev_attr.attr,
++	&sensor_dev_attr_pwm2.dev_attr.attr,
++	&sensor_dev_attr_pwm2_mode.dev_attr.attr,
++	&sensor_dev_attr_config_load.dev_attr.attr,
++	&sensor_dev_attr_config_save.dev_attr.attr,
++	&sensor_dev_attr_table1_size.dev_attr.attr,
++	&sensor_dev_attr_table1_hyst.dev_attr.attr,
++	&sensor_dev_attr_table1_temp1.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm1.dev_attr.attr,
++	&sensor_dev_attr_table1_temp2.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm2.dev_attr.attr,
++	&sensor_dev_attr_table1_temp3.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm3.dev_attr.attr,
++	&sensor_dev_attr_table1_temp4.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm4.dev_attr.attr,
++	&sensor_dev_attr_table1_temp5.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm5.dev_attr.attr,
++	&sensor_dev_attr_table1_temp6.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm6.dev_attr.attr,
++	&sensor_dev_attr_table1_temp7.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm7.dev_attr.attr,
++	&sensor_dev_attr_table1_temp8.dev_attr.attr,
++	&sensor_dev_attr_table1_pwm8.dev_attr.attr,
++	&sensor_dev_attr_table2_size.dev_attr.attr,
++	&sensor_dev_attr_table2_hyst.dev_attr.attr,
++	&sensor_dev_attr_table2_temp1.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm1.dev_attr.attr,
++	&sensor_dev_attr_table2_temp2.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm2.dev_attr.attr,
++	&sensor_dev_attr_table2_temp3.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm3.dev_attr.attr,
++	&sensor_dev_attr_table2_temp4.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm4.dev_attr.attr,
++	&sensor_dev_attr_table2_temp5.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm5.dev_attr.attr,
++	&sensor_dev_attr_table2_temp6.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm6.dev_attr.attr,
++	&sensor_dev_attr_table2_temp7.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm7.dev_attr.attr,
++	&sensor_dev_attr_table2_temp8.dev_attr.attr,
++	&sensor_dev_attr_table2_pwm8.dev_attr.attr,
++	&sensor_dev_attr_in0_input.dev_attr.attr,
++	&sensor_dev_attr_in0_max.dev_attr.attr,
++	&sensor_dev_attr_in0_min.dev_attr.attr,
++	&sensor_dev_attr_in1_input.dev_attr.attr,
++	&sensor_dev_attr_in1_max.dev_attr.attr,
++	&sensor_dev_attr_in1_min.dev_attr.attr,
++	&sensor_dev_attr_in2_input.dev_attr.attr,
++	&sensor_dev_attr_in2_max.dev_attr.attr,
++	&sensor_dev_attr_in2_min.dev_attr.attr,
++	&sensor_dev_attr_in3_input.dev_attr.attr,
++	&sensor_dev_attr_in3_max.dev_attr.attr,
++	&sensor_dev_attr_in3_min.dev_attr.attr,
++	&sensor_dev_attr_in4_input.dev_attr.attr,
++	&sensor_dev_attr_in4_max.dev_attr.attr,
++	&sensor_dev_attr_in4_min.dev_attr.attr,
++	NULL
++};
++
++#define MITX_HWMON_DEV_ATTR_POWER           18
++#define MITX_HWMON_DEV_ATTR_EXT_TMON_CONFIG 18
++#define MITX_HWMON_DEV_ATTR_EXT_POWER       56
++
++static struct attribute_group bm_mitx_hwmon_group = {
++	.attrs = bm_mitx_hwmon_attributes,
++};
++
++static bool bm_mitx_hwmon_device_match(struct i2c_client *client)
++{
++	u16 vendor_id;
++	u16 device_id;
++
++	vendor_id = bm_mitx_hwmon_read_word(client, MITX_HWMON_REG_VEN_ID);
++	device_id = bm_mitx_hwmon_read_word(client, MITX_HWMON_REG_DEV_ID);
++	return (vendor_id == MITX_HWMON_REG_VEN_ID_TPL) &&
++		(device_id == MITX_HWMON_REG_DEV_ID_MITX_HWMON);
++}
++
++static int bm_mitx_hwmon_probe(struct i2c_client *client,
++		const struct i2c_device_id *id)
++{
++	struct bm_mitx_hwmon_data *data;
++	int err;
++
++	if (!i2c_check_functionality(client->adapter,
++				I2C_FUNC_SMBUS_BYTE_DATA))
++		return -EIO;
++
++	if (!bm_mitx_hwmon_device_match(client))
++		return -ENODEV;
++
++	data = devm_kzalloc(&client->dev, sizeof(struct bm_mitx_hwmon_data),
++			    GFP_KERNEL);
++	if (!data)
++		return -ENOMEM;
++
++	i2c_set_clientdata(client, data);
++	mutex_init(&data->update_lock);
++
++	data->caps = bm_mitx_hwmon_read_byte(client, MITX_HWMON_REG_CAP);
++	if (extended_attrs) {
++		if ((data->caps & MITX_HWMON_REG_CAP_TMON_CONFIG) == 0)
++			bm_mitx_hwmon_attributes[MITX_HWMON_DEV_ATTR_EXT_TMON_CONFIG] = NULL;
++		bm_mitx_hwmon_group.attrs = bm_mitx_hwmon_attributes_extended;
++	}
++	if ((data->caps & MITX_HWMON_REG_CAP_POWER) == 0) {
++		bm_mitx_hwmon_attributes[extended_attrs ?
++					MITX_HWMON_DEV_ATTR_EXT_POWER :
++					MITX_HWMON_DEV_ATTR_POWER] = NULL;
++	}
++
++	err = sysfs_create_group(&client->dev.kobj, &bm_mitx_hwmon_group);
++	if (err)
++		return err;
++
++	data->hwmon_dev = hwmon_device_register(&client->dev);
++	if (IS_ERR(data->hwmon_dev)) {
++		err = PTR_ERR(data->hwmon_dev);
++		goto exit_remove;
++	}
++
++	return 0;
++
++exit_remove:
++	sysfs_remove_group(&client->dev.kobj, &bm_mitx_hwmon_group);
++	return err;
++}
++
++static int bm_mitx_hwmon_remove(struct i2c_client *client)
++{
++	struct bm_mitx_hwmon_data *data = i2c_get_clientdata(client);
++
++	hwmon_device_unregister(data->hwmon_dev);
++	sysfs_remove_group(&client->dev.kobj, &bm_mitx_hwmon_group);
++	return 0;
++}
++
++static const struct i2c_device_id bm_mitx_hwmon_id[] = {
++	{ "bm_mitx_hwmon", 0 },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, bm_mitx_hwmon_id);
++
++static struct i2c_driver bm_mitx_hwmon_driver = {
++	.class = I2C_CLASS_HWMON,
++	.driver = {
++		.name = "bm_mitx_hwmon",
++	},
++	.probe = bm_mitx_hwmon_probe,
++	.remove = bm_mitx_hwmon_remove,
++	.id_table = bm_mitx_hwmon_id,
++};
++
++module_i2c_driver(bm_mitx_hwmon_driver);
++
++module_param(extended_attrs, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
++MODULE_PARM_DESC(extended_attrs, "Enable extended hwmon attributes");
++
++MODULE_LICENSE("GPL");
++MODULE_DESCRIPTION("Baikal-M-based Mini-ITX board hardware monitoring driver");
+diff --git a/drivers/hwmon/pvt.c b/drivers/hwmon/pvt.c
+new file mode 100644
+index 00000000000..8258a223049
+--- /dev/null
++++ b/drivers/hwmon/pvt.c
+@@ -0,0 +1,638 @@
++/*
++ * An hwmon driver for BAIKAL-M PVT Sensors based on
++ *
++ * Analog Bits. PVT Sensor Datasheet. Version: 2014.07.23
++ *
++ *  Copyright (C) 2017 Baikal Electronics JSC
++ *  Author:
++ *      Maxim Kaurkin <maxim.kaurkin@baikalelectronics.ru>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++#include <linux/interrupt.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/hwmon.h>
++#include <linux/hwmon-sysfs.h>
++#include <linux/of.h>
++#include <linux/mutex.h>
++#include <linux/sysfs.h>
++#include <linux/platform_device.h>
++#include <linux/mfd/core.h>
++#include <linux/io.h>
++#include <linux/arm-smccc.h>
++
++#define DRV_NAME "pvt"
++#define DRV_VERSION "2.0.0"
++
++#define BAIKAL_SMC_PVT_ID	0x82000001
++#define PVT_READ	0
++#define PVT_WRITE	1
++
++/* PVT registers */
++#define BK_PVT_CTRL		0x00
++#define BK_PVT_DATA		0x04
++#define BK_PVT_TTHRES		0x08
++#define BK_PVT_VTHRES		0x0C
++#define BK_PVT_TTIMEOUT		0x1C
++#define BK_PVT_INTR_STAT	0x20
++#define BK_PVT_INTR_MASK	0x24
++#define BK_PVT_CLR_INTR		0x2C
++/* PVT VALID bit reads TIMEOUT */
++#define BK_PVT_VALID_TIMEOUT	10000
++
++/* PVT VALUES and MASKS */
++#define BK_PVT_CTRL_EN_BIT  0x1
++#define BK_PVT_CTRL_TMOD    0x0
++#define BK_PVT_CTRL_VMOD    0x2
++#define BK_PVT_CTRL_LVTMOD  0b0100
++#define BK_PVT_CTRL_HVTMOD  0b1000
++#define BK_PVT_CTRL_SVTMOD  0b1100
++
++#define BK_PVT_INTR_MASK_TONLY  0x7F9
++#define BK_PVT_INTR_MASK_TVONLY 0x7E1
++#define BK_PVT_INTR_MASK_ALL  0x7FF
++
++#define BK_PVT_DATA_MASK    0x3ff
++#define BK_PVT_DATA_VALID   (1 << 10)
++
++#define BK_PVT_THRES_HI    0xFFC00
++#define BK_PVT_THRES_LO    0x3FF
++
++#define BK_PVT_TTIMEOUT_SET 10000000
++
++#define BK_PVT_INTR_STAT_TTHRES_LO 0x02
++#define BK_PVT_INTR_STAT_TTHRES_HI 0x04
++#define BK_PVT_INTR_STAT_VTHRES_LO 0x08
++#define BK_PVT_INTR_STAT_VTHRES_HI 0x10
++
++/* TEMP limits */
++#define TEMP_PVT_MAX 125000
++#define TEMP_PVT_MIN -40000
++#define TEMP_PVT_WARN   67000
++#define TEMP_PVT_REBOOT 75000
++/* Voltage limits */
++#define VOLT_PVT_MAX 800
++#define VOLT_PVT_MIN 1000
++
++
++/* coef for transformtion to T,C (10^-3) times 10^6
++ * DATA = BK_PVT_DATA [0:9]
++ * T =  COEF4 * DATA ^ 4 + COEF3 * DATA ^ 3 + COEF2 * DATA ^ 2 +
++ *    + COEF1 * DATA ^ 1 + COEF0 */
++#define COEF4   (-16743 )        /* (-1.6743E-11f)  * 10^15 */
++#define COEF3   (81542  )        /* (8.1542E-08f)   * 10^12 */
++#define COEF2   (-182010)        /* (-1.8201E-04f)  * 10^9  */
++#define COEF1   (310200 )        /* (3.1020E-01f)   * 10^6  */
++#define COEF0   (-48380 )        /* (-4.8380E+01f)  * 10^3  */
++
++/* coef for transformation T,C (10^-3) to DATA
++ * DATA = DCOEF3 * T^3 + DCOEF2 * T ^ 2 + DCOEF1 * T + DCOEF 0 */
++
++#define DCOEF3  (2617)
++#define DCOEF2  (8654)
++#define DCOEF1  (3923)
++#define DCOEF0  (172 )
++
++/*  coef for transformatio to V, mV
++ *  DATA = 1865.8 *  VOLTAGE- 1157.2 =>
++ *  VOLTAGE = 620 + data * 10000 / 18658;
++*/
++#define COEF0_V 620
++#define COEF1_V 18658
++
++static uint32_t writel_pvt(uint32_t val, uint32_t pvt_id, uint32_t offset) {
++
++    struct arm_smccc_res res;
++
++    arm_smccc_smc(BAIKAL_SMC_PVT_ID, PVT_WRITE, pvt_id, offset,
++    val, 0, 0, 0, &res);
++    return res.a0;
++}
++
++static uint32_t readl_pvt(uint32_t pvt_id, uint32_t offset) {
++
++    struct arm_smccc_res res;
++
++    arm_smccc_smc(BAIKAL_SMC_PVT_ID, PVT_READ, pvt_id, offset,
++    0, 0, 0, 0, &res);
++    return res.a0;
++}
++
++struct pvt_hwmon {
++    int pvt_id;
++    int base;
++    int irq;
++    const struct mfd_cell *cell;
++    struct device *hwmon;
++    struct completion read_completion;
++    struct mutex lock;
++    int temp;
++    int volt;
++    int svt;
++    int hvt;
++    int lvt;
++    bool mon_mod;
++};
++
++static void switch_to_mon_mod(struct pvt_hwmon *hwmon) {
++    //OFF PVT
++    writel_pvt( 0, hwmon->pvt_id , BK_PVT_CTRL);
++    //Set timeout of inerupts
++    writel_pvt( BK_PVT_TTIMEOUT_SET, hwmon->pvt_id , BK_PVT_TTIMEOUT);
++    pr_debug("pvt switch_to_mon_mod and set BK_PVT_TTIMEOUT %d\n",readl_pvt(hwmon->pvt_id , BK_PVT_TTIMEOUT));
++    //Mask all interupts
++    writel_pvt( BK_PVT_INTR_MASK_TVONLY, hwmon->pvt_id , BK_PVT_INTR_MASK);
++    //Switch to last VOLT or Temprature mon_mod
++    writel_pvt( ((hwmon->mon_mod)<<1), hwmon->pvt_id , BK_PVT_CTRL);
++    pr_debug("pvt switch_to_mon_mod and set BK_PVT_CTRL %d\n",readl_pvt(hwmon->pvt_id , BK_PVT_CTRL));
++    //ON PVT
++    writel_pvt( (BK_PVT_CTRL_EN_BIT)| ((hwmon->mon_mod)<<1), hwmon->pvt_id , BK_PVT_CTRL);
++}
++
++static int read_valid_datareg( struct pvt_hwmon *hwmon)
++{
++    register int data, i = 0;
++    data = readl_pvt(hwmon->pvt_id , BK_PVT_DATA);
++    data = 0;
++    while ( ! (data & (BK_PVT_DATA_VALID) )  ) {
++        data = readl_pvt(hwmon->pvt_id , BK_PVT_DATA);
++        if( ++i == BK_PVT_VALID_TIMEOUT )
++            return -EINVAL;
++    }
++
++    data &= ( BK_PVT_DATA_MASK);
++    switch_to_mon_mod(hwmon);
++    return data;
++}
++
++
++static void switch_pvt_mod(int pvt_id, long int mod)
++{
++    pr_debug("BK PVT now %x, but need %lx \n",readl_pvt(pvt_id , BK_PVT_CTRL), (unsigned long)mod);
++    writel_pvt( 0, pvt_id , BK_PVT_CTRL);
++    //Set timeout of PVT measurment
++    writel_pvt( 0, pvt_id , BK_PVT_TTIMEOUT);
++    //Mask all interupts
++    writel_pvt( BK_PVT_INTR_MASK_ALL, pvt_id , BK_PVT_INTR_MASK);
++    writel_pvt( mod, pvt_id , BK_PVT_CTRL);
++    writel_pvt( ((BK_PVT_CTRL_EN_BIT)|mod), pvt_id , BK_PVT_CTRL);
++    pr_debug("BK PVT MOD %x\n",readl_pvt(pvt_id , BK_PVT_CTRL));
++}
++
++static int data2temp(int data)
++{
++    int temp, temp4, temp3, temp2, temp1, temp0;
++    pr_debug("pvt %d and data %d \n",( BK_PVT_DATA_MASK), data);
++    /*Dont changer the order of multiplication !!! */
++    temp4 = (COEF4) * data / 1000 * data / 1000 * data / 1000 * data / 1000;
++    temp3 = (COEF3) * data / 1000 * data / 1000 * data / 1000;
++    temp2 = (COEF2) * data / 1000 * data / 1000;
++    temp1 = (COEF1) * data / 1000;
++    temp0 = (COEF0) ;
++    temp = temp0 + temp1 + temp2 + temp3 + temp4;
++    pr_debug("BK PVT temp  %d = %d + %d + %d + %d + %d \n",temp, temp4, temp3, temp2 ,temp1, temp0);
++    return temp;
++}
++
++static irqreturn_t pvt_hwmon_irq(int irq, void *data)
++{
++    long int val;
++    int tmp, temp;
++    struct pvt_hwmon *hwmon = data;
++    val = readl_pvt( hwmon->pvt_id , BK_PVT_INTR_STAT);
++    if (BK_PVT_INTR_STAT_TTHRES_LO & val)
++        printk(KERN_INFO "PVT WARNING Lo Temperature \n");
++    if (BK_PVT_INTR_STAT_TTHRES_HI & val) {
++        switch_pvt_mod(hwmon->pvt_id,BK_PVT_CTRL_TMOD);
++        tmp = read_valid_datareg(hwmon);
++        temp = data2temp(tmp);
++        printk(KERN_INFO "PVT WARNING Hi Temperature %d\n", temp);
++        if(temp > TEMP_PVT_REBOOT) {
++            printk(KERN_INFO "PVT TOO Hi Temperature (%d > %d), then pm_power_off!\n", temp, TEMP_PVT_REBOOT);
++            pm_power_off();
++        }
++    }
++    if (BK_PVT_INTR_STAT_VTHRES_LO & val)
++        printk(KERN_INFO "PVT WARNING Lo Voltage \n");
++    if (BK_PVT_INTR_STAT_VTHRES_HI & val)
++        printk(KERN_INFO "PVT WARNING Lo Voltage \n");
++    val = readl_pvt( hwmon->pvt_id , BK_PVT_CLR_INTR);
++    complete(&hwmon->read_completion);
++    return IRQ_HANDLED;
++}
++
++static ssize_t pvt_show_name(struct device *dev,
++    struct device_attribute *dev_attr, char *buf)
++{
++    return sprintf(buf, "pvt-baikal\n");
++}
++
++static ssize_t pvt_show_mon_mod(struct device *dev,
++    struct device_attribute *dev_attr, char *buf)
++{
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    return sprintf(buf, "%d\n",hwmon->mon_mod);
++}
++
++static ssize_t set_mon_mod(struct device *dev, struct device_attribute *devattr,
++             const char *buf, size_t count)
++{
++    int err;
++    long data;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    err = kstrtol(buf, 10, &data);
++    if (err)
++        return err;
++    mutex_lock(&hwmon->lock);
++    hwmon->mon_mod = data;
++    switch_to_mon_mod(hwmon);
++    mutex_unlock(&hwmon->lock);
++    return count;
++}
++
++/* sysfs attributes for hwmon */
++static ssize_t pvt_show_temp(struct device *dev, struct device_attribute *da,
++             char *buf)
++{
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    int data, temp;
++    mutex_lock(&hwmon->lock);
++    switch_pvt_mod(hwmon->pvt_id,BK_PVT_CTRL_TMOD);
++    data = read_valid_datareg(hwmon);
++    temp = data2temp(data);
++    hwmon->temp = temp;
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", temp);
++}
++
++static int temp2data(int temp)
++{
++    int data3, data2, data1, data0, data;
++
++    if( temp > TEMP_PVT_MAX )
++        temp = TEMP_PVT_MAX;
++    if( temp < TEMP_PVT_MIN )
++        temp = TEMP_PVT_MIN;
++
++    /*Dont changer the order of multiplication !!! */
++    data3 = DCOEF3 * temp / 1000000 * temp / 1000000 * temp / 100000;
++    data2 = DCOEF2 * temp / 1000000 * temp / 1000000;
++    data1 = DCOEF1 * temp / 1000000;
++    data0 = DCOEF0;
++    data = data0 + data1 + data2 + data3;
++
++    pr_debug("pvt %d and data %d \n", (BK_PVT_DATA_MASK), data);
++
++    return data;
++}
++
++static int data2volt(int data)
++{
++    /* DATA = 1865.8 *  VOLTAGE- 1157.2 */
++    return (COEF0_V + ( data * 10000 ) / COEF1_V);
++}
++
++int volt2data(int volt)
++{
++    if( volt > VOLT_PVT_MAX )
++        volt = VOLT_PVT_MAX;
++    if( volt < VOLT_PVT_MIN )
++        volt = VOLT_PVT_MIN;
++    /* DATA = 1865.8 *  VOLTAGE- 1157.2 */
++    return (18658 * volt / 10000 - 1157 );
++}
++
++static ssize_t set_temp_min(struct device *dev, struct device_attribute *devattr,
++			 const char *buf, size_t count)
++{
++    unsigned int val, data;
++    long int temp;
++    int err;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    err = kstrtol(buf, 10, &temp);
++    if (err)
++        return err;
++    mutex_lock(&hwmon->lock);
++    data = readl_pvt(hwmon->pvt_id , BK_PVT_TTHRES);
++    val = temp2data(temp);
++    data = (data & BK_PVT_THRES_HI) + (BK_PVT_THRES_LO & val);
++    writel_pvt( data, hwmon->pvt_id , BK_PVT_TTHRES);
++    mutex_unlock(&hwmon->lock);
++    return count;
++}
++
++static ssize_t set_temp_max(struct device *dev, struct device_attribute *devattr,
++             const char *buf, size_t count)
++{
++    unsigned int val, data;
++    long int temp;
++    int err;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    err = kstrtol(buf, 10, &temp);
++    if (err)
++        return err;
++    mutex_lock(&hwmon->lock);
++    data = readl_pvt(hwmon->pvt_id , BK_PVT_TTHRES);
++    val = temp2data(temp);
++    data = ( (val<<10) & BK_PVT_THRES_HI) + (BK_PVT_THRES_LO & data);
++    writel_pvt( data, hwmon->pvt_id , BK_PVT_TTHRES);
++    mutex_unlock(&hwmon->lock);
++    return count;
++}
++
++static ssize_t set_volt_min(struct device *dev, struct device_attribute *devattr,
++             const char *buf, size_t count)
++{
++    unsigned int val, data;
++    long int volt;
++    int err;
++
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    err = kstrtol(buf, 10, &volt);
++    if (err)
++        return err;
++    mutex_lock(&hwmon->lock);
++    data = readl_pvt(hwmon->pvt_id , BK_PVT_VTHRES);
++    val = volt2data(volt);
++    data = (data & BK_PVT_THRES_HI) + (BK_PVT_THRES_LO & val);
++    writel_pvt( data, hwmon->pvt_id , BK_PVT_VTHRES);
++    mutex_unlock(&hwmon->lock);
++    return count;
++}
++
++static ssize_t set_volt_max(struct device *dev, struct device_attribute *devattr,
++             const char *buf, size_t count)
++{
++    unsigned int val, data;
++    long int volt;
++    int err;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    err = kstrtol(buf, 10, &volt);
++    if (err)
++        return err;
++    mutex_lock(&hwmon->lock);
++    data = readl_pvt(hwmon->pvt_id , BK_PVT_VTHRES);
++    val = volt2data(volt);
++    pr_debug("pvt set volt max %ld and val %x\n",volt,val);
++    data = ( (val<<10) & BK_PVT_THRES_HI) + (BK_PVT_THRES_LO & data);
++    writel_pvt( data, hwmon->pvt_id , BK_PVT_VTHRES);
++    mutex_unlock(&hwmon->lock);
++    return count;
++}
++
++static ssize_t pvt_show_temp_min(struct device *dev, struct device_attribute *devattr,
++             char *buf)
++{
++    unsigned int val, data;
++    int temp;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    mutex_lock(&hwmon->lock);
++    val = readl_pvt(hwmon->pvt_id , BK_PVT_TTHRES);
++    data = BK_PVT_THRES_LO & val;
++    temp = data2temp(data);
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", temp);
++}
++
++static ssize_t pvt_show_temp_max(struct device *dev, struct device_attribute *devattr,
++             char *buf)
++{
++    unsigned int val, data;
++    int temp;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    mutex_lock(&hwmon->lock);
++    val = readl_pvt(hwmon->pvt_id , BK_PVT_TTHRES);
++    data = (BK_PVT_THRES_HI & val) >> 10;
++    temp = data2temp(data);
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", temp);
++}
++
++static ssize_t pvt_show_volt_min(struct device *dev, struct device_attribute *devattr,
++             char *buf)
++{
++    unsigned int val, data;
++    int volt;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    mutex_lock(&hwmon->lock);
++    val = readl_pvt(hwmon->pvt_id , BK_PVT_VTHRES);
++    data = BK_PVT_THRES_LO & val;
++    volt = data2volt(data);
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", volt);
++}
++
++
++static ssize_t pvt_show_volt_max(struct device *dev, struct device_attribute *devattr,
++             char *buf)
++{
++    unsigned int val, data;
++    int volt;
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    mutex_lock(&hwmon->lock);
++    val = readl_pvt(hwmon->pvt_id , BK_PVT_VTHRES);
++    data = (BK_PVT_THRES_HI & val) >> 10;
++    volt = data2volt(data);
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", volt);
++}
++
++static ssize_t pvt_show_voltage(struct device *dev, struct device_attribute *da,
++             char *buf)
++{
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    int data, volt;
++    mutex_lock(&hwmon->lock);
++    switch_pvt_mod(hwmon->pvt_id , BK_PVT_CTRL_VMOD);
++    data = read_valid_datareg(hwmon);
++    /* Don't change the order of multiplication!!! */
++    volt = data2volt(data);
++    hwmon->volt = volt;
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", volt);
++}
++
++static ssize_t lvt_show(struct device *dev, struct device_attribute *da,
++             char *buf)
++{
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    int data;
++    mutex_lock(&hwmon->lock);
++    switch_pvt_mod(hwmon->pvt_id , BK_PVT_CTRL_LVTMOD);
++    data = read_valid_datareg(hwmon);
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", data);
++}
++
++static ssize_t hvt_show(struct device *dev, struct device_attribute *da,
++             char *buf)
++{
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    int data;
++    mutex_lock(&hwmon->lock);
++    switch_pvt_mod(hwmon->pvt_id , BK_PVT_CTRL_HVTMOD);
++    data = read_valid_datareg(hwmon);
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", data);
++}
++
++static ssize_t svt_show(struct device *dev, struct device_attribute *da,
++             char *buf)
++{
++    struct pvt_hwmon *hwmon = dev_get_drvdata(dev);
++    int data;
++    mutex_lock(&hwmon->lock);
++    switch_pvt_mod(hwmon->pvt_id , BK_PVT_CTRL_SVTMOD);
++    data = read_valid_datareg(hwmon);
++    mutex_unlock(&hwmon->lock);
++    return sprintf(buf, "%d\n", data);
++}
++
++
++static DEVICE_ATTR(name, S_IRUGO, pvt_show_name, NULL);
++static DEVICE_ATTR(temp1_input, S_IRUGO, pvt_show_temp, NULL);
++static DEVICE_ATTR(in1_input, S_IRUGO, pvt_show_voltage, NULL);
++static DEVICE_ATTR(lvt_input, S_IRUGO, lvt_show, NULL);
++static DEVICE_ATTR(hvt_input, S_IRUGO, hvt_show, NULL);
++static DEVICE_ATTR(svt_input, S_IRUGO, svt_show, NULL);
++static DEVICE_ATTR(temp1_min, S_IWUSR | S_IRUGO, pvt_show_temp_min, set_temp_min);
++static DEVICE_ATTR(temp1_max, S_IWUSR | S_IRUGO, pvt_show_temp_max, set_temp_max);
++static DEVICE_ATTR(in1_min, S_IWUSR | S_IRUGO, pvt_show_volt_min, set_volt_min);
++static DEVICE_ATTR(in1_max, S_IWUSR | S_IRUGO, pvt_show_volt_max, set_volt_max);
++static DEVICE_ATTR(mon_mod, S_IWUSR | S_IRUGO, pvt_show_mon_mod, set_mon_mod);
++
++static struct attribute *pvt_attrs[] = {
++    &dev_attr_name.attr,
++    &dev_attr_temp1_input.attr,
++    &dev_attr_temp1_min.attr,
++    &dev_attr_temp1_max.attr,
++    &dev_attr_in1_input.attr,
++    &dev_attr_in1_min.attr,
++    &dev_attr_in1_max.attr,
++    &dev_attr_lvt_input.attr,
++    &dev_attr_hvt_input.attr,
++    &dev_attr_svt_input.attr,
++    &dev_attr_mon_mod.attr,
++    NULL
++};
++
++static const struct attribute_group pvt_attr_group = {
++    .attrs = pvt_attrs,
++};
++
++
++static int pvt_probe(struct platform_device *pdev)
++{
++    int ret;
++    unsigned int val, data;
++    struct pvt_hwmon *hwmon;
++    struct resource *mem;
++
++    pr_debug("driver pvt_probe\n");
++    hwmon = devm_kzalloc(&pdev->dev, sizeof(*hwmon), GFP_KERNEL);
++    if (!hwmon)
++        return -ENOMEM;
++
++    mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++    hwmon->base = (int)mem->start;//devm_ioremap_resource(&pdev->dev, mem);
++
++    /* Set PVT ID for secure monitor calls */
++    device_property_read_u32(&pdev->dev, "pvt_id", &(hwmon->pvt_id));
++
++    hwmon->cell = mfd_get_cell(pdev);
++    hwmon->irq = platform_get_irq(pdev, 0);
++
++    if (hwmon->irq < 0) {
++        dev_err(&pdev->dev, "Failed to get platform irq: %d\n",
++            hwmon->irq);
++        return hwmon->irq;
++    }
++
++    init_completion(&hwmon->read_completion);
++    mutex_init(&hwmon->lock);
++
++    //Mask all interupts except TTRES_HILO
++    writel_pvt(BK_PVT_INTR_MASK_TVONLY, hwmon->pvt_id , BK_PVT_INTR_MASK);
++    pr_debug("pvt_probe BK_PVT_INTR_MASK %x\n", readl_pvt(hwmon->pvt_id , BK_PVT_INTR_MASK));
++
++    //Set timeout of PVT measurment
++    writel_pvt(BK_PVT_TTIMEOUT_SET, hwmon->pvt_id , BK_PVT_TTIMEOUT);
++    pr_debug("pvt_probe BK_PVT_TTIMEOUT %d\n",readl_pvt(hwmon->pvt_id , BK_PVT_TTIMEOUT));
++
++
++    platform_set_drvdata(pdev, hwmon);
++    ret = devm_request_irq(&pdev->dev, hwmon->irq, pvt_hwmon_irq, 0,
++                   pdev->name, hwmon);
++    if (ret) {
++        dev_err(&pdev->dev, "Failed to request irq: %d\n", ret);
++        return ret;
++    }
++
++    ret = sysfs_create_group(&pdev->dev.kobj, &pvt_attr_group);
++    if (ret) {
++        dev_err(&pdev->dev, "Failed to create sysfs group: %d\n", ret);
++        return ret;
++    }
++
++    hwmon->hwmon = hwmon_device_register_with_info(&pdev->dev, pdev->name,
++						   hwmon, NULL, NULL);
++    if (IS_ERR(hwmon->hwmon)) {
++        ret = PTR_ERR(hwmon->hwmon);
++        goto err_remove_file;
++    }
++    //Set WARN temperature
++    mutex_lock(&hwmon->lock);
++    data = readl_pvt(hwmon->pvt_id , BK_PVT_TTHRES);
++    val = temp2data(TEMP_PVT_WARN);
++    data = ( (val<<10) & BK_PVT_THRES_HI) + (BK_PVT_THRES_LO & data);
++    writel_pvt( data, hwmon->pvt_id , BK_PVT_TTHRES);
++    mutex_unlock(&hwmon->lock);
++    //Set Monitoring mod for temperature
++    hwmon->mon_mod = 0;
++    switch_to_mon_mod(hwmon);
++    pr_debug("pvt_probe hwmon_device_register %d\n",ret);
++    return 0;
++
++err_remove_file:
++    sysfs_remove_group(&pdev->dev.kobj, &pvt_attr_group);
++    return ret;
++}
++
++static int pvt_remove(struct platform_device *pdev)
++{
++    struct pvt_hwmon *hwmon = platform_get_drvdata(pdev);
++    hwmon_device_unregister(hwmon->hwmon);
++    sysfs_remove_group(&pdev->dev.kobj, &pvt_attr_group);
++    return 0;
++}
++
++static const struct of_device_id pvt_dt_match[] = {
++    { .compatible = "baikal,pvt" },
++    { },
++};
++
++static struct platform_driver pvt_hwmon_driver = {
++    .probe	  = pvt_probe,
++    .remove	  = pvt_remove,
++    .driver = {
++        .name = "pvt-hwmon",
++        .of_match_table = of_match_ptr(pvt_dt_match),
++    },
++};
++
++module_platform_driver(pvt_hwmon_driver);
++
++MODULE_DESCRIPTION("PVT BAIKAL driver");
++MODULE_AUTHOR("Maxim Kaurkin <maxim.kaurkin@baikalelectronics.ru>");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:pvt-hwmon");
