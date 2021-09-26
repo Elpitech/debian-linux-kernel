@@ -132,7 +132,7 @@ bugfix/all/tools-include-uapi-fix-errno.h.patch
 # Baikal patches
 baikal/baikal-m__device_tree,_defconfig.patch
 baikal/baikal-m__clock_driver.patch
-baikal/revert_"serial__8250_dw__allow_hardware_flow_control_to_be_used".patch
+baikal/revert_serial__8250_dw__allow_hardware_flow_control_to_be_used.patch
 baikal/efi-arm-runtime__print_efi_mapping.patch
 baikal/ethernet__stmmac__made_dwmac1000_-_dma_functions_available_for_reuse.patch
 baikal/stmmac__be-m1000_dwmac_driver.patch
