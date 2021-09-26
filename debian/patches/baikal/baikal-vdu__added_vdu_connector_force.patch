@@ -1,0 +1,42 @@
+baikal-vdu: Added VDU connector force
+
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_connector.c b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+index d165c62ef584..f0c9444dfffc 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_connector.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+@@ -23,6 +23,7 @@
+ #include <drm/drm_probe_helper.h>
+ 
+ #include "baikal_vdu_drm.h"
++#include "baikal_vdu_regs.h"
+ 
+ static void baikal_vdu_connector_destroy(struct drm_connector *connector)
+ {
+@@ -36,6 +37,17 @@ static void baikal_vdu_connector_destroy(struct drm_connector *connector)
+ 	drm_connector_cleanup(connector);
+ }
+ 
++static void baikal_vdu_connector_force(struct drm_connector *connector)
++{
++	struct baikal_vdu_private *priv = to_baikal_vdu_private(connector);
++	u32 cntl = readl(priv->regs + CR1);
++	if (connector->force == DRM_FORCE_OFF)
++		cntl &= ~CR1_LCE;
++	else
++		cntl |= CR1_LCE;
++	writel(cntl, priv->regs + CR1);
++}
++
+ static enum drm_connector_status baikal_vdu_connector_detect(
+ 		struct drm_connector *connector, bool force)
+ {
+@@ -128,6 +140,7 @@ const struct drm_connector_funcs connector_funcs = {
+ 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
+ 	.set_property = baikal_vdu_lvds_set_property,
+ 	.destroy = baikal_vdu_connector_destroy,
++	.force = baikal_vdu_connector_force,
+ };
+ 
+ const struct drm_connector_helper_funcs connector_helper_funcs = {

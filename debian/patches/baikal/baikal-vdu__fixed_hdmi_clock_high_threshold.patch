@@ -1,0 +1,17 @@
+baikal-vdu: Fixed HDMI clock high threshold
+
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+
+diff --git a/drivers/gpu/drm/baikal/baikal-hdmi.c b/drivers/gpu/drm/baikal/baikal-hdmi.c
+index cf07176f83ea..757b84086cd4 100644
+--- a/drivers/gpu/drm/baikal/baikal-hdmi.c
++++ b/drivers/gpu/drm/baikal/baikal-hdmi.c
+@@ -57,7 +57,7 @@ static enum drm_mode_status baikal_hdmi_mode_valid(struct drm_connector *con,
+ {
+ 	if (mode->clock < 13500)
+ 		return MODE_CLOCK_LOW;
+-	if (mode->clock >= 600000)
++	if (mode->clock >= 340000)
+ 		return MODE_CLOCK_HIGH;
+ 	if (fixed_clock && mode->clock != fixed_clock)
+ 		return MODE_BAD;

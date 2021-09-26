@@ -1,0 +1,32 @@
+Fixed TP EC tp_serio compat string in dts
+
+From: Miniakhmetov Vitaly <vitalii.miniakhmetov@t-platforms.ru>
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+index d553b846d418..7e3c7eeadff6 100644
+--- a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+@@ -99,7 +99,7 @@ eeprom@53 {
+ 	};
+ 
+ 	ps2port@54 {
+-		compatible = "tp,tp_serio";
++		compatible = "tp,serio", "tp,tp_serio";
+ 		reg = <0x54>;
+ 		interrupt-parent = <&porta>;
+ 		interrupts = <14 8>;
+diff --git a/drivers/input/serio/tp_serio.c b/drivers/input/serio/tp_serio.c
+index f2b0f78ffaa4..1aaa2916b623 100644
+--- a/drivers/input/serio/tp_serio.c
++++ b/drivers/input/serio/tp_serio.c
+@@ -692,6 +692,10 @@ static void tp_serio_unregister(struct tp_serio_driver *driver)
+ }
+ 
+ static const struct of_device_id tp_serio_of_ids[] = {
++	{
++		.compatible = "tp,serio",
++	},
++	/* NOTE: The following stay here for backward compatibility */
+ 	{
+ 		.compatible = "tp,tp_serio",
+ 	},

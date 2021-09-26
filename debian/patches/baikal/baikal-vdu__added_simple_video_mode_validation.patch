@@ -1,0 +1,77 @@
+baikal-vdu: Added simple video mode validation
+
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+
+The maximum available resolution set at 2560x1440.
+To use higher reslution set `baikal_vdu_drm.mode_override=1`.
+
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+index 322b7ecf83ae..ee895798ea09 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+@@ -221,6 +221,17 @@ static void baikal_vdu_crtc_helper_mode_set_nofb(struct drm_crtc *crtc)
+ 	crtc->hwmode = crtc->state->adjusted_mode;
+ }
+ 
++static enum drm_mode_status baikal_vdu_mode_valid(struct drm_crtc *crtc,
++	                const struct drm_display_mode *mode)
++{
++	struct baikal_vdu_private *priv = crtc->dev->dev_private;
++	if (!priv->mode_override && (mode->hdisplay > 2560 ||
++			mode->vdisplay > 1440))
++		return MODE_BAD;
++	else
++		return MODE_OK;
++}
++
+ static void baikal_vdu_crtc_helper_enable(struct drm_crtc *crtc,
+ 					  struct drm_crtc_state *old_state)
+ {
+@@ -338,6 +349,7 @@ const struct drm_crtc_funcs crtc_funcs = {
+ const struct drm_crtc_helper_funcs crtc_helper_funcs = {
+ 	.mode_fixup = baikal_vdu_crtc_mode_fixup,
+ 	.mode_set_nofb = baikal_vdu_crtc_helper_mode_set_nofb,
++	.mode_valid = baikal_vdu_mode_valid,
+ 	.atomic_flush = baikal_vdu_crtc_helper_atomic_flush,
+ 	.disable = baikal_vdu_crtc_helper_disable,
+ 	.atomic_enable = baikal_vdu_crtc_helper_enable,
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drm.h b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+index d9caa46bc1b1..3e1f4dff318f 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_drm.h
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+@@ -41,6 +41,7 @@ struct baikal_vdu_private {
+ 	spinlock_t lock;
+ 	u32 counters[20];
+ 	int mode_fixup;
++	int mode_override;
+ 	int type;
+ 	int ep_count;
+ 	u32 fb_addr;
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drv.c b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+index bd7bf1ec8024..4990a0365bcc 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_drv.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+@@ -51,6 +51,7 @@
+ #define BAIKAL_SMC_SCP_LOG_DISABLE  0x82000200
+ 
+ int mode_fixup = 0;
++int mode_override = 0;
+ 
+ static struct drm_mode_config_funcs mode_config_funcs = {
+ 	.fb_create = drm_gem_fb_create,
+@@ -201,6 +202,7 @@ static int vdu_modeset_init(struct drm_device *dev)
+ 	}
+ 
+ 	priv->mode_fixup = mode_fixup;
++	priv->mode_override = mode_override;
+ 
+ 	baikal_vdu_remove_efifb(dev);
+ 
+@@ -374,6 +376,7 @@ static struct platform_driver baikal_vdu_platform_driver = {
+ };
+ 
+ module_param(mode_fixup, int, 0644);
++module_param(mode_override, int, 0644);
+ 
+ module_platform_driver(baikal_vdu_platform_driver);
+ 

@@ -1,0 +1,17 @@
+dwmac-baikal: Porting to 5.13.y
+
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+
+diff --git a/drivers/net/ethernet/stmicro/stmmac/dwmac-baikal.c b/drivers/net/ethernet/stmicro/stmmac/dwmac-baikal.c
+index e706ece9b4f5..2826eb35210a 100644
+--- a/drivers/net/ethernet/stmicro/stmmac/dwmac-baikal.c
++++ b/drivers/net/ethernet/stmicro/stmmac/dwmac-baikal.c
+@@ -152,7 +152,7 @@ static int dwmac_baikal_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	if (pdev->dev.of_node) {
+-		plat_dat = stmmac_probe_config_dt(pdev, &stmmac_res.mac);
++		plat_dat = stmmac_probe_config_dt(pdev, stmmac_res.mac);
+ 		if (IS_ERR(plat_dat)) {
+ 			dev_err(&pdev->dev, "dt configuration failed\n");
+ 			return PTR_ERR(plat_dat);

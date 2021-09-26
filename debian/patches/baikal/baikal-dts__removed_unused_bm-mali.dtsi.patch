@@ -1,0 +1,65 @@
+baikal-dts: Removed unused bm-mali.dtsi
+
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-dbm.dts b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+index b82011b13f48..493d2ce681c6 100644
+--- a/arch/arm64/boot/dts/baikal/bm-dbm.dts
++++ b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+@@ -7,7 +7,6 @@
+ /dts-v1/;
+ 
+ #include "bm-soc.dtsi"
+-#include "bm-mali.dtsi"
+ 
+ / {
+ 	model = "Baikal Electronics Baikal-M evaluation board";
+diff --git a/arch/arm64/boot/dts/baikal/bm-mali.dtsi b/arch/arm64/boot/dts/baikal/bm-mali.dtsi
+deleted file mode 100644
+index 81105b86ac5a..000000000000
+--- a/arch/arm64/boot/dts/baikal/bm-mali.dtsi
++++ /dev/null
+@@ -1,19 +0,0 @@
+-// SPDX-License-Identifier: GPL-2.0
+-/*
+- * Device tree include file for BE-M1000 Mali GPU
+- * Copyright (C) 2018-2021 Baikal Electronics, JSC
+- */
+-
+-/ {
+-	soc {
+-		gpu: gpu@2a200000 {
+-			compatible = "arm,mali-midgard", "arm,mali-t628";
+-			#cooling-cells = <2>; /* min followed by max */
+-			reg = <0x0 0x2a200000 0x0 0x4000>;
+-			interrupts = <0 175 4 0 176 4 0 174 4>;
+-			interrupt-names = "job", "mmu", "gpu";
+-			clocks = <&gpu_clk>;
+-			clock-names = "gpuclk";
+-		};
+-	};
+-};
+diff --git a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+index 9d430416a3f0..8c25884e0fc9 100644
+--- a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+@@ -5,7 +5,6 @@
+  */
+ 
+ #include "bm-soc.dtsi"
+-#include "bm-mali.dtsi"
+ 
+ / {
+ 	model = "Baikal Electronics Baikal-M mitx board";
+diff --git a/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts b/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts
+index 99d7accc81e1..6891319df63e 100644
+--- a/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts
++++ b/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts
+@@ -8,7 +8,6 @@
+ 
+ #include "bm-soc.dtsi"
+ #include "bm-cpufreq.dtsi"
+-#include "bm-mali.dtsi"
+ 
+ / {
+ 

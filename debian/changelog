@@ -1,8 +1,9 @@
 linux (5.13.16-1~exp1) UNRELEASED; urgency=medium
 
   * Update to version 5.13.16
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.13.16
 
- -- Konstantin Kirik (snegovick) <snegovick@uprojects.org> Sun, 26 Sep 2021 02:37:00 +0200
+ -- Konstantin Kirik (snegovick) <snegovick@uprojects.org>  Sun, 26 Sep 2021 02:37:00 +0300
 
 linux (5.13.13-1~exp1) UNRELEASED; urgency=medium
 

@@ -1,0 +1,30 @@
+baikal-dts: Fixed PCIe clk `line-name` property
+
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+index 8c25884e0fc9..08d2c5002b5c 100644
+--- a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+@@ -145,7 +145,7 @@ pcieclk {
+ 		gpio-hog;
+ 		gpios = <1 GPIO_ACTIVE_LOW>;
+ 		output-high;
+-		line_name = "pcie-x8-clock";
++		line-name = "pcie-x8-clock";
+ 	};
+ };
+ 
+diff --git a/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts b/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts
+index 6891319df63e..9d9463b4a92b 100644
+--- a/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts
++++ b/arch/arm64/boot/dts/baikal/edelweiss-e107-mb-a0.dts
+@@ -273,7 +273,7 @@ &spi0 {
+ 
+ &porta {
+ 	pcieclk {
+-		line_name = "pcie-x8-clock";
++		line-name = "pcie-x8-clock";
+ 		gpio-hog;
+ 		gpios = <1 GPIO_ACTIVE_LOW>;
+ 		output-high;

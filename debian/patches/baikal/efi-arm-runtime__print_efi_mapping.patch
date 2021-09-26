@@ -1,0 +1,18 @@
+efi/arm-runtime: print EFI mapping
+
+From: Roman Stavtsev <roman.stavtsev@baikalelectronics.ru>
+
+diff --git a/drivers/firmware/efi/arm-runtime.c b/drivers/firmware/efi/arm-runtime.c
+index 3359ae2adf24..5028cd1605f3 100644
+--- a/drivers/firmware/efi/arm-runtime.c
++++ b/drivers/firmware/efi/arm-runtime.c
+@@ -71,6 +71,9 @@ static bool __init efi_virtmap_init(void)
+ 			pr_warn("  EFI remap %pa: failed to create mapping (%d)\n",
+ 				&phys, ret);
+ 			return false;
++		} else {
++			pr_info("  EFI remap %pa => %llx\n",
++				&phys, (unsigned long long)md->virt_addr);
+ 		}
+ 	}
+ 

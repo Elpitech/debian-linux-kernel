@@ -1,0 +1,791 @@
+Renamed module tp_bmc to tp_ec
+
+From: Miniakhmetov Vitaly <vitalii.miniakhmetov@t-platforms.ru>
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+index 51416c1623f1..d553b846d418 100644
+--- a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+@@ -65,7 +65,7 @@ &i2c0 {
+ 	status = "okay";
+ 
+ 	bmc@8 {
+-		compatible = "tp,mitx2-bmc", "t-platforms,mitx2-bmc";
++		compatible = "tp,ec", "tp,mitx2-bmc", "t-platforms,mitx2-bmc";
+ 		reg = <0x08>;
+ 	};
+ 
+diff --git a/arch/arm64/configs/baikal_defconfig b/arch/arm64/configs/baikal_defconfig
+index 695ce7ca9148..205e6db7b137 100644
+--- a/arch/arm64/configs/baikal_defconfig
++++ b/arch/arm64/configs/baikal_defconfig
+@@ -495,7 +495,7 @@ CONFIG_ATA_OVER_ETH=m
+ CONFIG_VIRTIO_BLK=m
+ CONFIG_BLK_DEV_RBD=y
+ CONFIG_BLK_DEV_NVME=y
+-CONFIG_TP_BMC=y
++CONFIG_TP_EC=y
+ CONFIG_EEPROM_AT24=y
+ CONFIG_EEPROM_AT25=m
+ CONFIG_RAID_ATTRS=m
+diff --git a/arch/arm64/configs/baikal_taishan_defconfig b/arch/arm64/configs/baikal_taishan_defconfig
+index baeecb638ad4..3128ae37da97 100644
+--- a/arch/arm64/configs/baikal_taishan_defconfig
++++ b/arch/arm64/configs/baikal_taishan_defconfig
+@@ -2187,7 +2187,7 @@ CONFIG_VEXPRESS_SYSCFG=y
+ # CONFIG_PCI_ENDPOINT_TEST is not set
+ # CONFIG_XILINX_SDFEC is not set
+ CONFIG_PVPANIC=m
+-CONFIG_TP_BMC=m
++CONFIG_TP_EC=m
+ # CONFIG_C2PORT is not set
+ 
+ #
+diff --git a/arch/arm64/configs/tp_baikal_defconfig b/arch/arm64/configs/tp_baikal_defconfig
+index 9ef3e223effe..1f6b37b57cfa 100644
+--- a/arch/arm64/configs/tp_baikal_defconfig
++++ b/arch/arm64/configs/tp_baikal_defconfig
+@@ -486,7 +486,7 @@ CONFIG_VIRTIO_BLK=m
+ CONFIG_BLK_DEV_RBD=m
+ CONFIG_BLK_DEV_RSXX=m
+ CONFIG_BLK_DEV_NVME=y
+-CONFIG_TP_BMC=y
++CONFIG_TP_EC=y
+ CONFIG_EEPROM_AT24=y
+ CONFIG_EEPROM_AT25=m
+ CONFIG_RAID_ATTRS=m
+diff --git a/arch/arm64/configs/tp_baikalm_defconfig b/arch/arm64/configs/tp_baikalm_defconfig
+index 3155c9fc61b5..1d7b717a2408 100644
+--- a/arch/arm64/configs/tp_baikalm_defconfig
++++ b/arch/arm64/configs/tp_baikalm_defconfig
+@@ -212,7 +212,7 @@ CONFIG_VIRTIO_BLK=m
+ CONFIG_BLK_DEV_RBD=m
+ CONFIG_BLK_DEV_RSXX=m
+ CONFIG_BLK_DEV_NVME=y
+-CONFIG_TP_BMC=y
++CONFIG_TP_EC=y
+ CONFIG_EEPROM_AT24=y
+ CONFIG_EEPROM_AT25=m
+ CONFIG_BLK_DEV_SD=y
+diff --git a/drivers/misc/Kconfig b/drivers/misc/Kconfig
+index 87a452220042..69e922d0939e 100644
+--- a/drivers/misc/Kconfig
++++ b/drivers/misc/Kconfig
+@@ -447,21 +447,21 @@ config HISI_HIKEY_USB
+ 	  switching between the dual-role USB-C port and the USB-A host ports
+ 	  using only one USB controller.
+ 
+-config TP_BMC
+-	tristate "T-platforms Baikal-T(1)/M BMC"
++config TP_EC
++	tristate "T-platforms Baikal-T(1)/M Embedded Controller"
+ 	depends on I2C && SYSFS
+ 	depends on OF
+ 	select PINCTRL
+ 	select GENERIC_PINCONF
+ 	select SERIO
+ 	help
+-	  Say Y here if you want to build a driver for T-platforms BMC devices
++	  Say Y here if you want to build a driver for T-platforms EC devices
+ 	  embedded into the boards with Baikal-T(1)/M processors. The device main
+ 	  purpose is the CPU kick-starting as well as some additional side-way
+ 	  functionality like power on/off buttons state tracing and full device
+ 	  powering off.
+ 
+-	  If you choose to build module, its name will be tp-bt-bmc. If unsure,
++	  If you choose to build module, its name will be tp-ec. If unsure,
+ 	  say N here.
+ 
+ source "drivers/misc/c2port/Kconfig"
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index 05f62062913d..980de3b0f6c7 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -57,4 +57,4 @@ obj-$(CONFIG_HABANA_AI)		+= habanalabs/
+ obj-$(CONFIG_UACCE)		+= uacce/
+ obj-$(CONFIG_XILINX_SDFEC)	+= xilinx_sdfec.o
+ obj-$(CONFIG_HISI_HIKEY_USB)	+= hisi_hikey_usb.o
+-obj-$(CONFIG_TP_BMC)		+= tp_bmc.o
++obj-$(CONFIG_TP_EC)		+= tp_ec.o
+diff --git a/drivers/misc/tp_bmc.c b/drivers/misc/tp_ec.c
+similarity index 67%
+rename from drivers/misc/tp_bmc.c
+rename to drivers/misc/tp_ec.c
+index 0b320d3ffae4..f61d39f39674 100644
+--- a/drivers/misc/tp_bmc.c
++++ b/drivers/misc/tp_ec.c
+@@ -38,50 +38,50 @@ enum I2C_REGS {
+ 	R_COUNT
+ };
+ 
+-#define BMC_ID1_VAL 0x49
+-#define BMC_ID2_VAL 0x54
+-#define BMC_ID3_VAL 0x58
+-#define BMC_ID4_VAL0 0x32
+-#define BMC_ID4_VAL1 0x2
++#define EC_ID1_VAL 0x49
++#define EC_ID2_VAL 0x54
++#define EC_ID3_VAL 0x58
++#define EC_ID4_VAL0 0x32
++#define EC_ID4_VAL1 0x2
+ 
+-#define BMC_VERSION1	0
+-#define BMC_VERSION2	2
+-#define BMC_VERSION2_3	3
++#define EC_VERSION1	0
++#define EC_VERSION2	2
++#define EC_VERSION2_3	3
+ 
+-#define BMC_CAP_PWRBTN		0x1
+-#define BMC_CAP_TOUCHPAD	0x2
+-#define BMC_CAP_RTC		0x4
+-#define BMC_CAP_FRU		0x8
+-#define BMC_CAP_GPIODIR		0x10
++#define EC_CAP_PWRBTN		0x1
++#define EC_CAP_TOUCHPAD	0x2
++#define EC_CAP_RTC		0x4
++#define EC_CAP_FRU		0x8
++#define EC_CAP_GPIODIR		0x10
+ 
+-#define BMC_SERIO_BUFSIZE	7
++#define EC_SERIO_BUFSIZE	7
+ 
+ #define POLL_JIFFIES 100
+ 
+-struct bmc_poll_data {
++struct ec_poll_data {
+ 	struct i2c_client *c;
+ };
+ 
+-static struct i2c_client *bmc_i2c;
++static struct i2c_client *ec_i2c;
+ static struct i2c_client *rtc_i2c;
+-static struct i2c_driver mitx2_bmc_i2c_driver;
++static struct i2c_driver tp_ec_i2c_driver;
+ static struct input_dev *button_dev;
+-static struct bmc_poll_data poll_data;
++static struct ec_poll_data poll_data;
+ static struct task_struct *polling_task;
+ #ifdef CONFIG_SERIO
+ static struct i2c_client *serio_i2c;
+ static struct task_struct *touchpad_task;
+ #endif
+-static u8 bmc_proto_version[3];
+-static u8 bmc_bootreason[2];
+-static u8 bmc_scratch[4];
+-static int bmc_cap;
+-static const char input_name[] = "BMC input dev";
++static u8 ec_proto_version[3];
++static u8 ec_bootreason[2];
++static u8 ec_scratch[4];
++static int ec_cap;
++static const char input_name[] = "TP EC input dev";
+ static u8 prev_ret;
+ 
+-/* BMC RTC */
++/* EC RTC */
+ static int
+-bmc_rtc_read_time(struct device *dev, struct rtc_time *tm)
++ec_rtc_read_time(struct device *dev, struct rtc_time *tm)
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	uint8_t rtc_buf[8];
+@@ -116,7 +116,7 @@ bmc_rtc_read_time(struct device *dev, struct rtc_time *tm)
+ }
+ 
+ static int
+-bmc_rtc_set_time(struct device *dev, struct rtc_time *tm)
++ec_rtc_set_time(struct device *dev, struct rtc_time *tm)
+ {
+ 	struct i2c_client *client = to_i2c_client(dev);
+ 	uint8_t rtc_buf[8];
+@@ -156,15 +156,15 @@ bmc_rtc_set_time(struct device *dev, struct rtc_time *tm)
+ }
+ 
+ static const struct rtc_class_ops
+-bmc_rtc_ops = {
+-	.read_time = bmc_rtc_read_time,
+-	.set_time = bmc_rtc_set_time,
++ec_rtc_ops = {
++	.read_time = ec_rtc_read_time,
++	.set_time = ec_rtc_set_time,
+ };
+ 
+ #ifdef CONFIG_SERIO
+-/* BMC serio (PS/2 touchpad) interface */
++/* EC serio (PS/2 touchpad) interface */
+ 
+-static int bmc_serio_write(struct serio *id, unsigned char val)
++static int ec_serio_write(struct serio *id, unsigned char val)
+ {
+ 	struct i2c_client *client = id->port_data;
+ 	uint8_t buf[4];
+@@ -176,7 +176,7 @@ static int bmc_serio_write(struct serio *id, unsigned char val)
+ 	msg.flags = 0;
+ 	msg.len = 1;
+ 	msg.buf = buf;
+-	dev_dbg(&client->dev, "bmc_serio_write: %02x\n", val);
++	dev_dbg(&client->dev, "ec_serio_write: %02x\n", val);
+ 	rc = i2c_transfer(client->adapter, &msg, 1);
+ 	if (rc != 1)
+ 		dev_err(&client->dev, "i2c write: %d\n", rc);
+@@ -185,27 +185,27 @@ static int bmc_serio_write(struct serio *id, unsigned char val)
+ }
+ 
+ /* returns: -1 on error, +1 if more data available, 0 otherwise */
+-static int bmc_serio_read(struct i2c_client *client)
++static int ec_serio_read(struct i2c_client *client)
+ {
+ 	struct serio *serio = dev_get_drvdata(&client->dev);
+ 	int i, rc, cnt;
+-	uint8_t buf[BMC_SERIO_BUFSIZE];
++	uint8_t buf[EC_SERIO_BUFSIZE];
+ 	struct i2c_msg msg;
+ 
+ 	msg.addr = client->addr;
+ 	msg.flags = I2C_M_RD;
+-	msg.len = BMC_SERIO_BUFSIZE;
++	msg.len = EC_SERIO_BUFSIZE;
+ 	msg.buf = buf;
+ 	rc = i2c_transfer(client->adapter, &msg, 1);
+ 	if (rc != 1) {
+-		dev_err(&client->dev, "bmc_serio_read: i2c_transfer error %d\n", rc);
++		dev_err(&client->dev, "ec_serio_read: i2c_transfer error %d\n", rc);
+ 		return -1;
+ 	}
+ 
+ 	cnt = buf[0];
+ 	rc = 0;
+-	if (cnt > BMC_SERIO_BUFSIZE - 1) {
+-		cnt = BMC_SERIO_BUFSIZE - 1;
++	if (cnt > EC_SERIO_BUFSIZE - 1) {
++		cnt = EC_SERIO_BUFSIZE - 1;
+ 		rc = 1;
+ 	}
+ 
+@@ -223,7 +223,7 @@ touchpad_poll_fn(void *data) {
+ 	while (1) {
+ 		if (kthread_should_stop())
+ 			break;
+-		while ((ret = bmc_serio_read(serio_i2c)) > 0)
++		while ((ret = ec_serio_read(serio_i2c)) > 0)
+ 			;
+ 		if (ret < 0) {
+ 			msleep_interruptible(10000);
+@@ -235,10 +235,10 @@ touchpad_poll_fn(void *data) {
+ #endif /* CONFIG_SERIO */
+ 
+ #ifdef CONFIG_PINCTRL
+-static uint8_t bmc_pincf_state [3];
+-#define BMC_NPINS	(sizeof(bmc_pincf_state) * 8)
++static uint8_t ec_pincf_state [3];
++#define EC_NPINS	(sizeof(ec_pincf_state) * 8)
+ 
+-static struct pinctrl_pin_desc bmc_pin_desc[BMC_NPINS] = {
++static struct pinctrl_pin_desc ec_pin_desc[EC_NPINS] = {
+ 	PINCTRL_PIN(0, "P0"),
+ 	PINCTRL_PIN(1, "P1"),
+ 	PINCTRL_PIN(2, "P2"),
+@@ -265,25 +265,25 @@ static struct pinctrl_pin_desc bmc_pin_desc[BMC_NPINS] = {
+ 	PINCTRL_PIN(23, "P23"),
+ };
+ 
+-#define PCTRL_DEV	"bmc_pinctrl"
++#define PCTRL_DEV	"ec_pinctrl"
+ 
+-static int bmc_pin_config_get(struct pinctrl_dev *pctldev,
++static int ec_pin_config_get(struct pinctrl_dev *pctldev,
+ 			      unsigned pin,
+ 			      unsigned long *config)
+ {
+ 	int idx, bit;
+ 
+-	if (pin > BMC_NPINS)
++	if (pin > EC_NPINS)
+ 		return -EINVAL;
+ 
+ 	idx = pin >> 3;
+ 	bit = pin & 7;
+ 
+-	*config = !!(bmc_pincf_state[idx] & (1 << bit));
++	*config = !!(ec_pincf_state[idx] & (1 << bit));
+ 	return 0;
+ }
+ 
+-static int bmc_pin_config_set(struct pinctrl_dev *pctldev,
++static int ec_pin_config_set(struct pinctrl_dev *pctldev,
+ 			      unsigned pin,
+ 			      unsigned long *config,
+ 			      unsigned nc)
+@@ -292,7 +292,7 @@ static int bmc_pin_config_set(struct pinctrl_dev *pctldev,
+ 	enum pin_config_param param;
+ 	int arg;
+ 
+-	if (pin > BMC_NPINS)
++	if (pin > EC_NPINS)
+ 		return -EINVAL;
+ 
+ 	idx = pin >> 3;
+@@ -304,12 +304,12 @@ static int bmc_pin_config_set(struct pinctrl_dev *pctldev,
+ 		return -EINVAL;
+ 
+ 	if (arg)
+-		bmc_pincf_state[idx] |= (1 << bit);
++		ec_pincf_state[idx] |= (1 << bit);
+ 	else
+-		bmc_pincf_state[idx] &= ~(1 << bit);
+-dev_dbg(&bmc_i2c->dev, "bmc_pin_config_set: pin %u, dir %lu\n", pin, *config);
++		ec_pincf_state[idx] &= ~(1 << bit);
++dev_dbg(&ec_i2c->dev, "ec_pin_config_set: pin %u, dir %lu\n", pin, *config);
+ 
+-	return i2c_smbus_write_byte_data(bmc_i2c, R_GPIODIR0 + idx, bmc_pincf_state[idx]);
++	return i2c_smbus_write_byte_data(ec_i2c, R_GPIODIR0 + idx, ec_pincf_state[idx]);
+ }
+ 
+ void pinconf_generic_dump_config(struct pinctrl_dev *pctldev,
+@@ -318,56 +318,56 @@ void pinconf_generic_dump_config(struct pinctrl_dev *pctldev,
+ void pinctrl_utils_free_map(struct pinctrl_dev *pctldev,
+ 			    struct pinctrl_map *map, unsigned num_maps);
+ 
+-static const struct pinconf_ops bmc_confops = {
+-	.pin_config_get = bmc_pin_config_get,
+-	.pin_config_set = bmc_pin_config_set,
++static const struct pinconf_ops ec_confops = {
++	.pin_config_get = ec_pin_config_get,
++	.pin_config_set = ec_pin_config_set,
+ 	.pin_config_config_dbg_show = pinconf_generic_dump_config,
+ };
+ 
+-static int bmc_groups_count(struct pinctrl_dev *pctldev)
++static int ec_groups_count(struct pinctrl_dev *pctldev)
+ {
+ 	return 0;
+ }
+ 
+-static const char *bmc_group_name(struct pinctrl_dev *pctldev,
++static const char *ec_group_name(struct pinctrl_dev *pctldev,
+ 				   unsigned selector)
+ {
+ 	return NULL;
+ }
+ 
+-static const struct pinctrl_ops bmc_ctrl_ops = {
+-	.get_groups_count = bmc_groups_count,
+-	.get_group_name = bmc_group_name,
++static const struct pinctrl_ops ec_ctrl_ops = {
++	.get_groups_count = ec_groups_count,
++	.get_group_name = ec_group_name,
+ 	.dt_node_to_map = pinconf_generic_dt_node_to_map_pin,
+ 	.dt_free_map = pinctrl_utils_free_map,
+ };
+ 
+-static struct pinctrl_desc bmc_pincrtl_desc = {
++static struct pinctrl_desc ec_pincrtl_desc = {
+ 	.name = PCTRL_DEV,
+-	.pins = bmc_pin_desc,
+-	.pctlops = &bmc_ctrl_ops,
+-	.npins = BMC_NPINS,
+-	.confops = &bmc_confops,
++	.pins = ec_pin_desc,
++	.pctlops = &ec_ctrl_ops,
++	.npins = EC_NPINS,
++	.confops = &ec_confops,
+ };
+ 
+-static struct pinctrl_dev *bmc_pinctrl_dev;
++static struct pinctrl_dev *ec_pinctrl_dev;
+ 
+-static int bmc_pinctrl_register(struct device *dev)
++static int ec_pinctrl_register(struct device *dev)
+ {
+ 	struct pinctrl_dev *pctrl_dev;
+ 	struct platform_device *pbdev;
+ 
+ 	pbdev = platform_device_alloc(PCTRL_DEV, -1);
+ 	pbdev->dev.parent = dev;
+-	pbdev->dev.of_node = of_find_node_by_name(dev->of_node, "bmc_pinctrl");
++	pbdev->dev.of_node = of_find_node_by_name(dev->of_node, "ec_pinctrl");
+ 	platform_device_add(pbdev);
+-	pctrl_dev = devm_pinctrl_register(&pbdev->dev, &bmc_pincrtl_desc, NULL);
++	pctrl_dev = devm_pinctrl_register(&pbdev->dev, &ec_pincrtl_desc, NULL);
+ 	if (IS_ERR(pctrl_dev)) {
+ 		dev_err(&pbdev->dev, "Can't register pinctrl (%ld)\n", PTR_ERR(pctrl_dev));
+ 		return PTR_ERR(pctrl_dev);
+ 	} else {
+-		dev_info(&pbdev->dev, "BMC pinctrl registered\n");
+-		bmc_pinctrl_dev = pctrl_dev;
++		dev_info(&pbdev->dev, "TP EC pinctrl registered\n");
++		ec_pinctrl_dev = pctrl_dev;
+ 	}
+ 	/* reset all pins to default state */
+ 	i2c_smbus_write_byte_data(to_i2c_client(dev), R_GPIODIR0, 0);
+@@ -376,21 +376,21 @@ static int bmc_pinctrl_register(struct device *dev)
+ 	return 0;
+ }
+ 
+-static void bmc_pinctrl_unregister(void)
++static void ec_pinctrl_unregister(void)
+ {
+-	if (bmc_pinctrl_dev)
+-		devm_pinctrl_unregister(&bmc_i2c->dev, bmc_pinctrl_dev);
++	if (ec_pinctrl_dev)
++		devm_pinctrl_unregister(&ec_i2c->dev, ec_pinctrl_dev);
+ }
+ 
+ #endif
+ 
+ void
+-bmc_pwroff_rq(void) {
++ec_pwroff_rq(void) {
+ 	int ret = 0;
+ 
+-	dev_info(&bmc_i2c->dev, "Write reg R_PWROFF_RQ\n");
+-	ret = i2c_smbus_write_byte_data(bmc_i2c, R_PWROFF_RQ, 0x01);
+-	dev_info(&bmc_i2c->dev, "ret: %i\n", ret);
++	dev_info(&ec_i2c->dev, "Write reg R_PWROFF_RQ\n");
++	ret = i2c_smbus_write_byte_data(ec_i2c, R_PWROFF_RQ, 0x01);
++	dev_info(&ec_i2c->dev, "ret: %i\n", ret);
+ }
+ 
+ int
+@@ -428,15 +428,15 @@ pwroff_rq_poll_fn(void *data) {
+ }
+ 
+ static int
+-mitx2_bmc_validate(struct i2c_client *client) {
++tp_ec_validate(struct i2c_client *client) {
+ 	int ret = 0;
+ 	int i = 0;
+ 	static const u8 regs[] = {R_ID1, R_ID2, R_ID3};
+-	static const u8 vals[] = {BMC_ID1_VAL, BMC_ID2_VAL, BMC_ID3_VAL};
++	static const u8 vals[] = {EC_ID1_VAL, EC_ID2_VAL, EC_ID3_VAL};
+ 
+-	bmc_proto_version[0] = 0;
+-	bmc_proto_version[1] = 0;
+-	bmc_proto_version[2] = 0;
++	ec_proto_version[0] = 0;
++	ec_proto_version[1] = 0;
++	ec_proto_version[2] = 0;
+ 
+ 	for (i = 0; i < ARRAY_SIZE(regs); i++) {
+ 		ret = i2c_smbus_read_byte_data(client, regs[i]);
+@@ -458,40 +458,40 @@ mitx2_bmc_validate(struct i2c_client *client) {
+ 		dev_err(&client->dev, "Could not read register %x\n", R_ID4);
+ 		return -EIO;
+ 	}
+-	if (ret == BMC_ID4_VAL0) {
+-		bmc_proto_version[0] = 0;
+-	} else if (ret == BMC_ID4_VAL1) {
+-		bmc_proto_version[0] = 2;
++	if (ret == EC_ID4_VAL0) {
++		ec_proto_version[0] = 0;
++	} else if (ret == EC_ID4_VAL1) {
++		ec_proto_version[0] = 2;
+ 		ret = i2c_smbus_read_byte_data(client, R_VERSION1);
+ 		if (ret < 0) {
+ 			dev_err(&client->dev, "Could not read register %x\n",
+ 				R_VERSION1);
+ 			return -EIO;
+ 		}
+-		bmc_proto_version[1] = ret;
++		ec_proto_version[1] = ret;
+ 		ret = i2c_smbus_read_byte_data(client, R_VERSION2);
+ 		if (ret < 0) {
+ 			dev_err(&client->dev, "Could not read register %x\n",
+ 				R_VERSION2);
+ 			return -EIO;
+ 		}
+-		bmc_proto_version[2] = ret;
++		ec_proto_version[2] = ret;
+ 		ret = i2c_smbus_read_byte_data(client, R_BOOTREASON);
+ 		if (ret < 0) {
+ 			dev_err(&client->dev, "Could not read register %x\n",
+ 				R_BOOTREASON);
+ 			return -EIO;
+ 		}
+-		bmc_bootreason[0] = ret;
+-		dev_info(&client->dev, "BMC bootreason[0]->%i\n", ret);
++		ec_bootreason[0] = ret;
++		dev_info(&client->dev, "TP-EC bootreason[0]->%i\n", ret);
+ 		ret = i2c_smbus_read_byte_data(client, R_BOOTREASON_ARG);
+ 		if (ret < 0) {
+ 			dev_err(&client->dev, "Could not read register %x\n",
+ 				R_BOOTREASON_ARG);
+ 			return -EIO;
+ 		}
+-		bmc_bootreason[1] = ret;
+-		dev_info(&client->dev, "BMC bootreason[1]->%i\n", ret);
++		ec_bootreason[1] = ret;
++		dev_info(&client->dev, "TP-EC bootreason[1]->%i\n", ret);
+ 		for (i = R_SCRATCH1; i <= R_SCRATCH4; i++) {
+ 			ret = i2c_smbus_read_byte_data(client, i);
+ 			if (ret < 0) {
+@@ -499,39 +499,39 @@ mitx2_bmc_validate(struct i2c_client *client) {
+ 					"Could not read register %x\n", i);
+ 				return -EIO;
+ 			}
+-			bmc_scratch[i - R_SCRATCH1] = ret;
++			ec_scratch[i - R_SCRATCH1] = ret;
+ 		}
+-		if (bmc_proto_version[2] >= BMC_VERSION2_3) {
++		if (ec_proto_version[2] >= EC_VERSION2_3) {
+ 			ret = i2c_smbus_read_byte_data(client, R_CAP);
+ 			if (ret >= 0)
+-				bmc_cap = ret;
++				ec_cap = ret;
+ 			dev_info(&client->dev,
+-				 "BMC extended capabilities %x\n", bmc_cap);
++				 "EC extended capabilities %x\n", ec_cap);
+ 		} else {
+-			bmc_cap = BMC_CAP_PWRBTN;
++			ec_cap = EC_CAP_PWRBTN;
+ 		}
+ 	} else {
+ 		dev_err(&client->dev, "Bad value [0x%02x] in register 0x%02x\n",
+ 			ret, R_ID4);
+ 		return -ENODEV;
+ 	}
+-	dev_info(&client->dev, "BMC seems to be valid\n");
++	dev_info(&client->dev, "EC seems to be valid\n");
+ 	return 0;
+ }
+ 
+ static int
+-bmc_create_client_devices(struct device *bmc_dev)
++ec_create_client_devices(struct device *ec_dev)
+ {
+ 	int ret = 0;
+ 	struct rtc_device *rtc_dev;
+-	struct i2c_client *client = to_i2c_client(bmc_dev);
++	struct i2c_client *client = to_i2c_client(ec_dev);
+ 	int client_addr = client->addr + 1;
+ 
+-	if (bmc_cap & BMC_CAP_TOUCHPAD) {
++	if (ec_cap & EC_CAP_TOUCHPAD) {
+ #ifdef CONFIG_SERIO
+ 		struct serio *serio;
+ 		serio_i2c = i2c_new_ancillary_device(client,
+-						     "bmc_serio", client_addr);
++						     "ec_serio", client_addr);
+ 		if (IS_ERR(serio_i2c)) {
+ 			dev_err(&client->dev, "Can't get serio secondary\n");
+ 			serio_i2c = NULL;
+@@ -546,21 +546,21 @@ bmc_create_client_devices(struct device *bmc_dev)
+ 			serio_i2c = NULL;
+ 			goto skip_tp;
+ 		}
+-		serio->write = bmc_serio_write;
++		serio->write = ec_serio_write;
+ 		serio->port_data = serio_i2c;
+ 		serio->id.type = SERIO_PS_PSTHRU;
+ 		serio_register_port(serio);
+ 		dev_set_drvdata(&serio_i2c->dev, serio);
+-		touchpad_task = kthread_run(touchpad_poll_fn, NULL, "BMC serio poll task");
++		touchpad_task = kthread_run(touchpad_poll_fn, NULL, "EC serio poll task");
+ 
+ skip_tp:
+ #endif
+ 		client_addr++;
+ 	}
+ 
+-	if (bmc_cap & BMC_CAP_RTC) {
++	if (ec_cap & EC_CAP_RTC) {
+ 		rtc_i2c = i2c_new_ancillary_device(client,
+-						   "bmc_rtc", client_addr);
++						   "ec_rtc", client_addr);
+ 		if (IS_ERR(rtc_i2c)) {
+ 			dev_err(&client->dev, "Can't get RTC secondary\n");
+ 			rtc_i2c = NULL;
+@@ -568,8 +568,8 @@ bmc_create_client_devices(struct device *bmc_dev)
+ 			goto fail;
+ 		}
+ 
+-		rtc_dev = devm_rtc_device_register(&rtc_i2c->dev, "bmc_rtc",
+-						   &bmc_rtc_ops, THIS_MODULE);
++		rtc_dev = devm_rtc_device_register(&rtc_i2c->dev, "ec_rtc",
++						   &ec_rtc_ops, THIS_MODULE);
+ 		if (IS_ERR(rtc_dev)) {
+ 			ret = PTR_ERR(rtc_dev);
+ 			dev_err(&client->dev, "Failed to register RTC device: %d\n",
+@@ -582,27 +582,27 @@ bmc_create_client_devices(struct device *bmc_dev)
+ 	}
+ 
+ #ifdef CONFIG_PINCTRL
+-	if (bmc_cap & BMC_CAP_GPIODIR || 1 /*vvv*/)
+-		bmc_pinctrl_register(bmc_dev);
++	if (ec_cap & EC_CAP_GPIODIR || 1 /*vvv*/)
++		ec_pinctrl_register(ec_dev);
+ #endif
+ 
+ 	return ret;
+ }
+ 
+ static int
+-mitx2_bmc_i2c_probe(struct i2c_client *client,
++tp_ec_i2c_probe(struct i2c_client *client,
+ 		    const struct i2c_device_id *id)
+ {
+ 	int err = 0;
+ 	int i = 0;
+ 
+-	dev_info(&client->dev, "mitx2 bmc probe\n");
++	dev_info(&client->dev, "TP-EC probe\n");
+ 
+ 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
+ 		return -ENODEV;
+ 
+ 	for (i = 0; i < 10; i++) {
+-		err = mitx2_bmc_validate(client);
++		err = tp_ec_validate(client);
+ 		if (!err)
+ 			break;
+ 		msleep_interruptible(20);
+@@ -610,7 +610,7 @@ mitx2_bmc_i2c_probe(struct i2c_client *client,
+ 	if (err)
+ 		return err;
+ 
+-	if (bmc_cap & BMC_CAP_PWRBTN) {
++	if (ec_cap & EC_CAP_PWRBTN) {
+ 		button_dev = input_allocate_device();
+ 		if (!button_dev) {
+ 			dev_err(&client->dev, "Not enough memory\n");
+@@ -620,7 +620,7 @@ mitx2_bmc_i2c_probe(struct i2c_client *client,
+ 		button_dev->id.bustype = BUS_I2C;
+ 		button_dev->dev.parent = &client->dev;
+ 		button_dev->name = input_name;
+-		button_dev->phys = "bmc-input0";
++		button_dev->phys = "ec-input0";
+ 		button_dev->evbit[0] = BIT_MASK(EV_KEY);
+ 		button_dev->keybit[BIT_WORD(KEY_POWER)] = BIT_MASK(KEY_POWER);
+ 
+@@ -633,21 +633,21 @@ mitx2_bmc_i2c_probe(struct i2c_client *client,
+ 
+ 		dev_info(&client->dev, "Starting polling thread\n");
+ 		poll_data.c = client;
+-		polling_task = kthread_run(pwroff_rq_poll_fn, NULL, "BMC poll task");
++		polling_task = kthread_run(pwroff_rq_poll_fn, NULL, "EC poll task");
+ 	}
+ 
+-	if (bmc_cap || 1 /*vvv*/)
+-		err = bmc_create_client_devices(&client->dev);
++	if (ec_cap || 1 /*vvv*/)
++		err = ec_create_client_devices(&client->dev);
+ 
+-	bmc_i2c = client;
++	ec_i2c = client;
+ 	/* register as poweroff handler */
+-	pm_power_off = bmc_pwroff_rq;
++	pm_power_off = ec_pwroff_rq;
+ 
+ 	return 0;
+ }
+ 
+ static int
+-mitx2_bmc_i2c_remove(struct i2c_client *client)
++tp_ec_i2c_remove(struct i2c_client *client)
+ {
+ #ifdef CONFIG_SERIO
+ 	struct serio *serio;
+@@ -668,31 +668,33 @@ mitx2_bmc_i2c_remove(struct i2c_client *client)
+ 	if (rtc_i2c)
+ 		i2c_unregister_device(rtc_i2c);
+ #ifdef CONFIG_PINCTRL
+-	bmc_pinctrl_unregister();
++	ec_pinctrl_unregister();
+ #endif
+ 
+ 	return 0;
+ }
+ 
+ #ifdef CONFIG_OF
+-static const struct of_device_id mitx2_bmc_of_match[] = {
++static const struct of_device_id tp_ec_of_match[] = {
++	{ .compatible = "tp,ec" },
++	/* NOTE: The old compat string stay for backward compatibility */
+ 	{ .compatible = "tp,mitx2-bmc" },
+ 	{}
+ };
+-MODULE_DEVICE_TABLE(of, mitx2_bmc_of_match);
++MODULE_DEVICE_TABLE(of, tp_ec_of_match);
+ #endif
+ 
+-static const struct i2c_device_id mitx2_bmc_i2c_id[] = {
+-	{ "mitx2_bmc", 0 },
++static const struct i2c_device_id tp_ec_i2c_id[] = {
++	{ "tp_ec", 0 },
+ 	{ }
+ };
+-MODULE_DEVICE_TABLE(i2c, mitx2_bmc_i2c_id);
++MODULE_DEVICE_TABLE(i2c, tp_ec_i2c_id);
+ 
+ static ssize_t
+ version_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+ {
+-	return sprintf(buf, "%i.%i.%i\n", bmc_proto_version[0],
+-			bmc_proto_version[1], bmc_proto_version[2]);
++	return sprintf(buf, "%i.%i.%i\n", ec_proto_version[0],
++			ec_proto_version[1], ec_proto_version[2]);
+ }
+ 
+ static struct kobj_attribute version_attribute =
+@@ -702,8 +704,8 @@ static ssize_t
+ bootreason_show(struct kobject *kobj,
+ 		struct kobj_attribute *attr, char *buf)
+ {
+-	return sprintf(buf, "%i\n", (bmc_bootreason[0] |
+-			(bmc_bootreason[1] << 8)));
++	return sprintf(buf, "%i\n", (ec_bootreason[0] |
++			(ec_bootreason[1] << 8)));
+ }
+ 
+ static struct kobj_attribute bootreason_attribute =
+@@ -713,35 +715,35 @@ static ssize_t
+ scratch_show(struct kobject *kobj,
+ 	     struct kobj_attribute *attr, char *buf)
+ {
+-	return sprintf(buf, "%i\n", (bmc_scratch[0] | (bmc_scratch[1] << 8) |
+-			(bmc_scratch[2] << 16) | (bmc_scratch[3] << 24)));
++	return sprintf(buf, "%i\n", (ec_scratch[0] | (ec_scratch[1] << 8) |
++			(ec_scratch[2] << 16) | (ec_scratch[3] << 24)));
+ }
+ 
+ static struct kobj_attribute scratch_attribute =
+ 	__ATTR(scratch, 0664, scratch_show, NULL);
+ 
+-static struct attribute *bmc_attrs[] = {
++static struct attribute *ec_attrs[] = {
+ 	&version_attribute.attr,
+ 	&bootreason_attribute.attr,
+ 	&scratch_attribute.attr,
+ 	NULL,
+ };
+ 
+-ATTRIBUTE_GROUPS(bmc);
++ATTRIBUTE_GROUPS(ec);
+ 
+-static struct i2c_driver mitx2_bmc_i2c_driver = {
++static struct i2c_driver tp_ec_i2c_driver = {
+ 	.driver		= {
+-		.name	= "mitx2-bmc",
+-		.of_match_table = of_match_ptr(mitx2_bmc_of_match),
+-		.groups = bmc_groups,
++		.name	= "tp-ec",
++		.of_match_table = of_match_ptr(tp_ec_of_match),
++		.groups = ec_groups,
+ 	},
+-	.probe		= mitx2_bmc_i2c_probe,
+-	.remove	  = mitx2_bmc_i2c_remove,
+-	.id_table	= mitx2_bmc_i2c_id,
++	.probe		= tp_ec_i2c_probe,
++	.remove	  = tp_ec_i2c_remove,
++	.id_table	= tp_ec_i2c_id,
+ };
+-module_i2c_driver(mitx2_bmc_i2c_driver);
++module_i2c_driver(tp_ec_i2c_driver);
+ 
+ MODULE_AUTHOR("Konstantin Kirik");
+-MODULE_DESCRIPTION("mITX2 BMC driver");
++MODULE_DESCRIPTION("T-Platforms Mini-ITX boards embedded controller driver");
+ MODULE_LICENSE("GPL");
+-MODULE_ALIAS("serial:bmc");
++MODULE_ALIAS("serial:ec");

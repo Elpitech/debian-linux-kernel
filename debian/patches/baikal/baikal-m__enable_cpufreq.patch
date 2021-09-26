@@ -1,0 +1,17 @@
+Baikal-M: enable 'cpufreq'
+
+From: Roman Stavtsev <roman.stavtsev@baikalelectronics.ru>
+
+diff --git a/drivers/cpufreq/cpufreq-dt-platdev.c b/drivers/cpufreq/cpufreq-dt-platdev.c
+index 1f8dc1164ba2..4ecf705ad241 100644
+--- a/drivers/cpufreq/cpufreq-dt-platdev.c
++++ b/drivers/cpufreq/cpufreq-dt-platdev.c
+@@ -32,6 +32,8 @@ static const struct of_device_id whitelist[] __initconst = {
+ 	{ .compatible = "arm,integrator-ap", },
+ 	{ .compatible = "arm,integrator-cp", },
+ 
++	{ .compatible = "baikal,baikal-m", },
++
+ 	{ .compatible = "hisilicon,hi3660", },
+ 
+ 	{ .compatible = "fsl,imx27", },
