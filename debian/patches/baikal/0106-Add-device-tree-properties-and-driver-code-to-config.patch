@@ -1,4 +1,4 @@
-From cc906ec2384079735be330bc81b8237bf0549712 Mon Sep 17 00:00:00 2001
+From beb47fdc6668a1e9a6b25ccd6d279c83ad1f3a46 Mon Sep 17 00:00:00 2001
 From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
 Date: Fri, 8 Oct 2021 04:19:27 +0300
 Subject: [PATCH 106/106] Add device tree properties and driver code to

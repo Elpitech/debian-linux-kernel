@@ -1,4 +1,4 @@
-From 12a702ad9cf79940b6ee74030dee1f989bb70ed5 Mon Sep 17 00:00:00 2001
+From f0f46adbc4245e56c48cc261d5d207b1d5625ada Mon Sep 17 00:00:00 2001
 From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
 Date: Wed, 6 Oct 2021 02:28:56 +0300
 Subject: [PATCH 105/106] Update et101-mb-a2 phy mode with working value, add
@@ -6,8 +6,8 @@ Subject: [PATCH 105/106] Update et101-mb-a2 phy mode with working value, add
 
 ---
  arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts | 9 +++++++++
- arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts | 8 ++++++++
- 2 files changed, 17 insertions(+)
+ arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts | 9 +++++++++
+ 2 files changed, 18 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts
 index 0e1e5e5f1df6..538ce4ed5a2e 100644
@@ -48,10 +48,18 @@ index 0e1e5e5f1df6..538ce4ed5a2e 100644
 +	realtek,led1-control = <RTL8211F_LINK10_1000_ACT>;
  };
 diff --git a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
-index 06a1916e15aa..9f8b71e397ce 100644
+index 06a1916e15aa..c755d964d0da 100644
 --- a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
 +++ b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
-@@ -24,17 +24,25 @@ &hda {
+@@ -10,6 +10,7 @@
+ 
+ #include "bm-mbm.dtsi"
+ #include "lvds-panel.dtsi"
++#include <dt-bindings/net/realtek-phy-rtl8211f.h>
+ 
+ / {
+ 	sound {
+@@ -24,17 +25,25 @@ &hda {
  &gmac0 {
  	status = "okay";
  	snps,reset-gpios = <&porta 19 GPIO_ACTIVE_LOW>;
