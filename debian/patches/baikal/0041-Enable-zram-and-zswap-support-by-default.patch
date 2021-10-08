@@ -1,0 +1,41 @@
+From d804f0da577c9367b3cf89826206fc7896c93fb9 Mon Sep 17 00:00:00 2001
+From: Miniakhmetov Vitaly <vitalii.miniakhmetov@t-platforms.ru>
+Date: Wed, 2 Jun 2021 09:58:34 +0500
+Subject: [PATCH 041/106] Enable `zram` and `zswap` support by default
+
+---
+ arch/arm64/configs/tp_baikalm_defconfig | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/configs/tp_baikalm_defconfig b/arch/arm64/configs/tp_baikalm_defconfig
+index 7f2375f521b6..0a62f3940db5 100644
+--- a/arch/arm64/configs/tp_baikalm_defconfig
++++ b/arch/arm64/configs/tp_baikalm_defconfig
+@@ -67,6 +67,8 @@ CONFIG_TRANSPARENT_HUGEPAGE=y
+ CONFIG_TRANSPARENT_HUGEPAGE_MADVISE=y
+ CONFIG_FRONTSWAP=y
+ CONFIG_CMA=y
++CONFIG_ZSWAP=y
++CONFIG_ZSMALLOC=m
+ CONFIG_NET=y
+ CONFIG_PACKET=y
+ CONFIG_PACKET_DIAG=y
+@@ -212,6 +214,7 @@ CONFIG_MTD_BLOCK2MTD=y
+ CONFIG_MTD_SPI_NOR=y
+ CONFIG_BLK_DEV_NULL_BLK=m
+ CONFIG_BLK_DEV_PCIESSD_MTIP32XX=m
++CONFIG_ZRAM=m
+ CONFIG_BLK_DEV_UMEM=m
+ CONFIG_BLK_DEV_LOOP=y
+ CONFIG_BLK_DEV_CRYPTOLOOP=m
+@@ -436,7 +439,6 @@ CONFIG_NLS_ISO8859_1=y
+ CONFIG_NLS_ISO8859_5=y
+ CONFIG_NLS_KOI8_R=y
+ CONFIG_NLS_UTF8=y
+-CONFIG_CRYPTO_LZO=y
+ CONFIG_CRYPTO_LZ4=m
+ CONFIG_CRYPTO_LZ4HC=m
+ CONFIG_CRYPTO_ANSI_CPRNG=m
+-- 
+2.33.0
+

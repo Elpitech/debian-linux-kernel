@@ -1,0 +1,437 @@
+From fb4d05807908c80e2083978fdaa41a62da1490e1 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 1 Jul 2021 16:12:36 +0500
+Subject: [PATCH 070/106] baikal-vdu: Added support for PWM-controlled
+ backlight
+
+---
+ arch/arm64/boot/dts/baikal/bm-dbm.dts         |  31 +++
+ drivers/gpu/drm/baikal/baikal_vdu_connector.c | 240 ++++++++++++++++++
+ drivers/gpu/drm/baikal/baikal_vdu_debugfs.c   |   2 +
+ drivers/gpu/drm/baikal/baikal_vdu_drm.h       |  15 +-
+ drivers/gpu/drm/baikal/baikal_vdu_drv.c       |   8 +
+ drivers/gpu/drm/baikal/baikal_vdu_regs.h      |   8 +
+ 6 files changed, 303 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-dbm.dts b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+index d4f8981e620b..23c2c8d217e8 100644
+--- a/arch/arm64/boot/dts/baikal/bm-dbm.dts
++++ b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+@@ -6,6 +6,7 @@
+ 
+ /dts-v1/;
+ 
++#include <dt-bindings/input/input.h>
+ #include "bm-soc.dtsi"
+ 
+ / {
+@@ -43,6 +44,29 @@ panel0_lvds1: endpoint@1 {
+ 		};
+ 	};
+ 
++	buttons-backlight {
++		compatible = "gpio-keys";
++		autorepeat;
++		button-brightness-down {
++			label = "Brightness Down Button";
++			linux,code = <KEY_BRIGHTNESSDOWN>;
++			gpios = <&porta 18 GPIO_ACTIVE_LOW>;
++			debounce-interval = <50>;
++		};
++		button-brightness-up {
++			label = "Brightness Up Button";
++			linux,code = <KEY_BRIGHTNESSUP>;
++			gpios = <&porta 17 GPIO_ACTIVE_LOW>;
++			debounce-interval = <50>;
++		};
++		button-brightness-toggle {
++			label = "Brightness Toggle Button";
++			linux,code = <KEY_BRIGHTNESS_TOGGLE>;
++			gpios = <&porta 31 GPIO_ACTIVE_LOW>;
++			debounce-interval = <50>;
++		};
++	};
++
+ 	sound {
+ 		compatible = "baikal,snd_soc_be";
+ 		baikal,cpu-dai = <&i2s>;
+@@ -303,6 +327,13 @@ &vdec {
+ 
+ &vdu0 {
+ 	status = "okay";
++	enable-gpios = <&porta 16 GPIO_ACTIVE_LOW>;
++	backlight {
++		min-brightness-level = <10>;
++		default-brightness-level = <60>;
++		brightness-level-step = <2>;
++		pwm-frequency = <20000>;
++	};
+ 	port {
+ 		vdu_lvds0_pads: endpoint@0 {
+ 			remote-endpoint = <&panel0_lvds0>;
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_connector.c b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+index f0c9444dfffc..805e6e17ec3f 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_connector.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+@@ -18,6 +18,9 @@
+  * BE-M1000 SoC's VDU
+  */
+ 
++#include <linux/clk.h>
++#include <linux/input.h>
++
+ #include <drm/drm_atomic_helper.h>
+ #include <drm/drm_panel.h>
+ #include <drm/drm_probe_helper.h>
+@@ -25,6 +28,11 @@
+ #include "baikal_vdu_drm.h"
+ #include "baikal_vdu_regs.h"
+ 
++#define BAIKAL_VDU_MIN_BRIGHTNESS	0
++#define BAIKAL_VDU_DEFAULT_BRIGHTNESS	50
++#define BAIKAL_VDU_BRIGHTNESS_STEP	5
++#define BAIKAL_VDU_DEFAULT_PWM_FREQ	10000
++
+ static void baikal_vdu_connector_destroy(struct drm_connector *connector)
+ {
+ 	struct baikal_vdu_private *priv =
+@@ -182,3 +190,235 @@ int baikal_vdu_lvds_connector_create(struct drm_device *dev)
+ 
+ 	return 0;
+ }
++
++static int baikal_vdu_backlight_update_status(struct backlight_device *bl_dev)
++{
++	struct baikal_vdu_private *priv = bl_get_data(bl_dev);
++	int brightness_on = 1;
++	int brightness = bl_dev->props.brightness;
++	u8 pwmdc;
++
++	if (bl_dev->props.power != FB_BLANK_UNBLANK ||
++	    bl_dev->props.fb_blank != FB_BLANK_UNBLANK ||
++	    bl_dev->props.state & (BL_CORE_SUSPENDED | BL_CORE_FBBLANK)) {
++		brightness_on = 0;
++		brightness = priv->min_brightness;
++	}
++
++	if (priv->enable_gpio)
++		gpiod_set_value_cansleep(priv->enable_gpio, brightness_on);
++
++	pwmdc = brightness ? ((brightness << 6) / 25 - 1) : 0;
++
++	writel(pwmdc, priv->regs + PWMDCR);
++
++	return 0;
++}
++
++static const struct backlight_ops baikal_vdu_backlight_ops = {
++	.options        = BL_CORE_SUSPENDRESUME,
++	.update_status	= baikal_vdu_backlight_update_status,
++};
++
++static void baikal_vdu_input_event(struct input_handle *handle,
++				   unsigned int type, unsigned int code,
++				   int value)
++{
++	struct baikal_vdu_private *priv = handle->private;
++	int brightness;
++
++	if (type != EV_KEY || value == 0)
++		return;
++
++	switch (code) {
++	case KEY_BRIGHTNESSDOWN:
++		brightness = priv->bl_dev->props.brightness -
++			     priv->brightness_step;
++		if (brightness >= priv->min_brightness)
++			backlight_device_set_brightness(priv->bl_dev,
++							brightness);
++		break;
++
++	case KEY_BRIGHTNESSUP:
++		brightness = priv->bl_dev->props.brightness +
++			     priv->brightness_step;
++		backlight_device_set_brightness(priv->bl_dev, brightness);
++		break;
++
++	case KEY_BRIGHTNESS_TOGGLE:
++		priv->brightness_on = !priv->brightness_on;
++		if (priv->brightness_on)
++			backlight_enable(priv->bl_dev);
++		else
++			backlight_disable(priv->bl_dev);
++		break;
++
++	default:
++		return;
++	}
++
++	backlight_force_update(priv->bl_dev, BACKLIGHT_UPDATE_HOTKEY);
++}
++
++static int baikal_vdu_input_connect(struct input_handler *handler,
++				    struct input_dev *dev,
++				    const struct input_device_id *id)
++{
++	struct input_handle *handle;
++	int ret;
++
++	handle = kzalloc(sizeof(*handle), GFP_KERNEL);
++	if (!handle)
++		return -ENOMEM;
++
++	handle->private = handler->private;
++	handle->name = KBUILD_MODNAME;
++	handle->dev = dev;
++	handle->handler = handler;
++
++	ret = input_register_handle(handle);
++	if (ret)
++		goto err_free_handle;
++
++	ret = input_open_device(handle);
++	if (ret)
++		goto err_unregister_handle;
++
++	return 0;
++
++err_unregister_handle:
++	input_unregister_handle(handle);
++err_free_handle:
++	kfree(handle);
++	return ret;
++}
++
++static void baikal_vdu_input_disconnect(struct input_handle *handle)
++{
++	input_close_device(handle);
++	input_unregister_handle(handle);
++	kfree(handle);
++}
++
++static const struct input_device_id baikal_vdu_input_ids[] = {
++	{
++		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
++		.evbit = { BIT_MASK(EV_KEY) },
++	},
++
++	{ },    /* Terminating entry */
++};
++
++MODULE_DEVICE_TABLE(input, baikal_vdu_input_ids);
++
++int baikal_vdu_backlight_create(struct drm_device *drm)
++{
++	struct baikal_vdu_private *priv = drm->dev_private;
++	struct device *dev = drm->dev;
++	struct backlight_properties props;
++	struct input_handler *handler;
++	struct device_node *node;
++	u32 min_brightness = BAIKAL_VDU_MIN_BRIGHTNESS;
++	u32 dfl_brightness = BAIKAL_VDU_DEFAULT_BRIGHTNESS;
++	u32 brightness_step = BAIKAL_VDU_BRIGHTNESS_STEP;
++	u32 pwm_frequency = 0;
++	int ret = 0;
++	unsigned long rate;
++	unsigned int pwmfr = 0;
++
++	priv->enable_gpio = devm_gpiod_get_optional(dev, "enable", GPIOD_ASIS);
++	if (IS_ERR(priv->enable_gpio)) {
++		dev_warn(dev, "failed to get ENABLE GPIO\n");
++		priv->enable_gpio = NULL;
++	}
++
++	if (priv->enable_gpio && gpiod_get_direction(priv->enable_gpio) != 0)
++		gpiod_direction_output(priv->enable_gpio, 1);
++
++	node = of_get_child_by_name(dev->of_node, "backlight");
++	if (!node)
++		return 0;
++
++	of_property_read_u32(node, "min-brightness-level", &min_brightness);
++	of_property_read_u32(node, "default-brightness-level", &dfl_brightness);
++	of_property_read_u32(node, "brightness-level-step", &brightness_step);
++	of_property_read_u32(node, "pwm-frequency", &pwm_frequency);
++
++	if (pwm_frequency == 0) {
++		dev_warn(dev, "using default PWM frequency %u\n",
++			 BAIKAL_VDU_DEFAULT_PWM_FREQ);
++		pwm_frequency = BAIKAL_VDU_DEFAULT_PWM_FREQ;
++	}
++
++	memset(&props, 0, sizeof(props));
++	props.max_brightness = 100;
++	props.type = BACKLIGHT_RAW;
++	props.scale = BACKLIGHT_SCALE_LINEAR;
++
++	if (min_brightness > props.max_brightness) {
++		dev_warn(dev, "invalid min brightness level: %u, using %u\n",
++			 min_brightness, props.max_brightness);
++		min_brightness = props.max_brightness;
++	}
++
++	if (dfl_brightness > props.max_brightness ||
++	    dfl_brightness < min_brightness) {
++		dev_warn(dev,
++			 "invalid default brightness level: %u, using %u\n",
++			 dfl_brightness, props.max_brightness);
++		dfl_brightness = props.max_brightness;
++	}
++
++	priv->min_brightness = min_brightness;
++	priv->brightness_step = brightness_step;
++	priv->brightness_on = true;
++
++	props.brightness = dfl_brightness;
++	props.power = FB_BLANK_UNBLANK;
++
++	priv->bl_dev =
++		devm_backlight_device_register(dev, dev_name(dev), dev, priv,
++					       &baikal_vdu_backlight_ops,
++					       &props);
++	if (IS_ERR(priv->bl_dev)) {
++		dev_err(dev, "failed to register backlight device\n");
++		ret = PTR_ERR(priv->bl_dev);
++		priv->bl_dev = NULL;
++		goto out;
++	}
++
++	handler = devm_kzalloc(dev, sizeof(*handler), GFP_KERNEL);
++	if (!handler) {
++		dev_err(dev, "failed to allocate input handler\n");
++		ret = -ENOMEM;
++		goto out;
++	}
++
++	handler->private = priv;
++	handler->event = baikal_vdu_input_event;
++	handler->connect = baikal_vdu_input_connect;
++	handler->disconnect = baikal_vdu_input_disconnect;
++	handler->name = KBUILD_MODNAME;
++	handler->id_table = baikal_vdu_input_ids;
++
++	ret = input_register_handler(handler);
++	if (ret) {
++		dev_err(dev, "failed to register input handler\n");
++		goto out;
++	}
++
++	/* Hold PWM Clock Domain Reset, disable clocking */
++	writel(0, priv->regs + PWMFR);
++
++	rate = clk_get_rate(priv->clk);
++	pwmfr |= PWMFR_PWMFCD(rate / pwm_frequency - 1) | PWMFR_PWMFCI;
++	writel(pwmfr, priv->regs + PWMFR);
++
++	/* Release PWM Clock Domain Reset, enable clocking */
++	writel(pwmfr | PWMFR_PWMPCR | PWMFR_PWMFCE, priv->regs + PWMFR);
++
++	backlight_update_status(priv->bl_dev);
++out:
++	of_node_put(node);
++	return ret;
++}
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c b/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
+index fd4d31ca7afd..31b1a5ba089c 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
+@@ -35,6 +35,8 @@ static const struct {
+ 	REGDEF(DBAR),
+ 	REGDEF(DCAR),
+ 	REGDEF(DEAR),
++	REGDEF(PWMFR),
++	REGDEF(PWMDCR),
+ 	REGDEF(HVTER),
+ 	REGDEF(HPPLOR),
+ 	REGDEF(GPIOR),
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drm.h b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+index 3e1f4dff318f..24b50f821ac7 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_drm.h
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+@@ -18,6 +18,8 @@
+ #include <drm/drm_gem.h>
+ #include <drm/drm_simple_kms_helper.h>
+ #include <linux/workqueue.h>
++#include <linux/gpio.h>
++#include <linux/backlight.h>
+ 
+ /* Append new drm mode definition here, align with libdrm definition */
+ #define DRM_MODE_SCALE_NO_SCALE	2
+@@ -47,8 +49,16 @@ struct baikal_vdu_private {
+ 	u32 fb_addr;
+ 	u32 fb_end;
+ 	struct delayed_work update_work;
+-};
+ 
++	/* backlight */
++	struct gpio_desc *enable_gpio;
++	struct backlight_device *bl_dev;
++
++	int min_brightness;
++	int brightness_step;
++
++	bool brightness_on;
++};
+ 
+ /* CRTC Functions */
+ int baikal_vdu_crtc_create(struct drm_device *dev);
+@@ -59,6 +69,9 @@ int baikal_vdu_primary_plane_init(struct drm_device *dev);
+ /* Connector Functions */
+ int baikal_vdu_lvds_connector_create(struct drm_device *dev);
+ 
++/* Backlight Functions */
++int baikal_vdu_backlight_create(struct drm_device *drm);
++
+ /* Debugfs functions */
+ int baikal_vdu_debugfs_init(struct drm_minor *minor);
+ 
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drv.c b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+index d593f7b9f722..ee07893c3d57 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_drv.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+@@ -337,8 +337,16 @@ static int baikal_vdu_drm_probe(struct platform_device *pdev)
+ 		goto dev_unref;
+ 	}
+ 
++	ret = baikal_vdu_backlight_create(drm);
++	if (ret != 0) {
++		dev_err(dev, "Failed to create backlight\n");
++		goto backlight_failed;
++	}
++
+ 	return 0;
+ 
++backlight_failed:
++	drm_mode_config_cleanup(drm);
+ dev_unref:
+ 	writel(0, priv->regs + IMR);
+ 	writel(0x3ffff, priv->regs + ISR);
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_regs.h b/drivers/gpu/drm/baikal/baikal_vdu_regs.h
+index dc9d7dae2f59..c28dbf0904de 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_regs.h
++++ b/drivers/gpu/drm/baikal/baikal_vdu_regs.h
+@@ -25,6 +25,8 @@
+ #define DBAR        0x028
+ #define DCAR        0x02C
+ #define DEAR        0x030
++#define PWMFR       0x034
++#define PWMDCR      0x038
+ #define HVTER       0x044
+ #define HPPLOR      0x048
+ #define GPIOR       0x1F8
+@@ -110,6 +112,12 @@
+ #define ISCR_VSC_VACTIVE    0x6
+ #define ISCR_VSC_VFP        0x7
+ 
++#define PWMFR_PWMPCR        BIT(24)
++#define PWMFR_PWMFCI        BIT(23)
++#define PWMFR_PWMFCE        BIT(22)
++#define PWMFR_PWMFCD_MASK   GENMASK(21, 0)
++#define PWMFR_PWMFCD(x)     ((x) << 0)
++
+ #define HVTER_VSWE_MASK     GENMASK(25, 24)
+ #define HVTER_VSWE(x)       ((x) << 24)
+ #define HVTER_HSWE_MASK     GENMASK(17, 16)
+-- 
+2.33.0
+

@@ -1,0 +1,101 @@
+From e273f00f21bde42114416282dc5f315f6e08cd41 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Fri, 2 Jul 2021 14:38:14 +0500
+Subject: [PATCH 076/106] baikal-vdu: Fixed missing static and const qualifiers
+
+---
+ drivers/gpu/drm/baikal/baikal-hdmi.c          | 2 +-
+ drivers/gpu/drm/baikal/baikal_vdu_connector.c | 4 ++--
+ drivers/gpu/drm/baikal/baikal_vdu_crtc.c      | 4 ++--
+ drivers/gpu/drm/baikal/baikal_vdu_drv.c       | 6 +++---
+ 4 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/gpu/drm/baikal/baikal-hdmi.c b/drivers/gpu/drm/baikal/baikal-hdmi.c
+index 0fae3f758f61..e19aafbac5c3 100644
+--- a/drivers/gpu/drm/baikal/baikal-hdmi.c
++++ b/drivers/gpu/drm/baikal/baikal-hdmi.c
+@@ -68,7 +68,7 @@ static enum drm_mode_status baikal_hdmi_mode_valid(struct dw_hdmi *hdmi, void *d
+ 	return MODE_OK;
+ }
+ 
+-static struct dw_hdmi_plat_data baikal_dw_hdmi_plat_data = {
++static const struct dw_hdmi_plat_data baikal_dw_hdmi_plat_data = {
+ 	.mpll_cfg   = baikal_hdmi_mpll_cfg,
+ 	.cur_ctr    = baikal_hdmi_cur_ctr,
+ 	.phy_config = baikal_hdmi_phy_cfg,
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_connector.c b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+index ddfb4d241e09..f034c98a65c8 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_connector.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+@@ -125,7 +125,7 @@ static void baikal_vdu_lvds_encoder_dpms(struct drm_encoder *encoder, int mode)
+ 	// TBD
+ }
+ 
+-const struct drm_connector_funcs connector_funcs = {
++static const struct drm_connector_funcs connector_funcs = {
+ 	//.dpms = drm_atomic_helper_connector_dpms, // TODO sort this out
+ 	.fill_modes = drm_helper_probe_single_connector_modes,
+ 	.detect = baikal_vdu_connector_detect,
+@@ -137,7 +137,7 @@ const struct drm_connector_funcs connector_funcs = {
+ 	.force = baikal_vdu_connector_force,
+ };
+ 
+-const struct drm_connector_helper_funcs connector_helper_funcs = {
++static const struct drm_connector_helper_funcs connector_helper_funcs = {
+ 	.get_modes = baikal_vdu_connector_helper_get_modes,
+ };
+ 
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+index fd5c2709e872..f9e8be8d318e 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+@@ -335,7 +335,7 @@ void baikal_vdu_disable_vblank(struct drm_crtc *crtc)
+ 	writel(INTR_FER, priv->regs + IMR);
+ }
+ 
+-const struct drm_crtc_funcs crtc_funcs = {
++static const struct drm_crtc_funcs crtc_funcs = {
+ 	.set_config = drm_atomic_helper_set_config,
+ 	.page_flip = drm_atomic_helper_page_flip,
+ 	.reset = drm_atomic_helper_crtc_reset,
+@@ -346,7 +346,7 @@ const struct drm_crtc_funcs crtc_funcs = {
+ 	.disable_vblank = baikal_vdu_disable_vblank,
+ };
+ 
+-const struct drm_crtc_helper_funcs crtc_helper_funcs = {
++static const struct drm_crtc_helper_funcs crtc_helper_funcs = {
+ 	.mode_fixup = baikal_vdu_crtc_mode_fixup,
+ 	.mode_set_nofb = baikal_vdu_crtc_helper_mode_set_nofb,
+ 	.mode_valid = baikal_vdu_mode_valid,
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drv.c b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+index bfec64cc90aa..6e6ebeee01be 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_drv.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+@@ -53,13 +53,13 @@
+ int mode_fixup = 0;
+ int mode_override = 0;
+ 
+-static struct drm_mode_config_funcs mode_config_funcs = {
++static const struct drm_mode_config_funcs mode_config_funcs = {
+ 	.fb_create = drm_gem_fb_create,
+ 	.atomic_check = drm_atomic_helper_check,
+ 	.atomic_commit = drm_atomic_helper_commit,
+ };
+ 
+-const struct drm_encoder_funcs baikal_vdu_encoder_funcs = {
++static const struct drm_encoder_funcs baikal_vdu_encoder_funcs = {
+ 	.destroy = drm_encoder_cleanup,
+ };
+ 
+@@ -235,7 +235,7 @@ static int vdu_modeset_init(struct drm_device *dev)
+ 
+ DEFINE_DRM_GEM_CMA_FOPS(drm_fops);
+ 
+-static struct drm_driver vdu_drm_driver = {
++static const struct drm_driver vdu_drm_driver = {
+ 	.driver_features = DRIVER_HAVE_IRQ | DRIVER_GEM |	DRIVER_MODESET | DRIVER_ATOMIC,
+ 	.irq_handler = baikal_vdu_irq,
+ 	.ioctls = NULL,
+-- 
+2.33.0
+

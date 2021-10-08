@@ -1,0 +1,51 @@
+From a5864cc0ee690d1ea415b811d5a393e6d6cbfe15 Mon Sep 17 00:00:00 2001
+From: Roman Stavtsev <roman.stavtsev@baikalelectronics.ru>
+Date: Sat, 17 Apr 2021 11:35:14 +0300
+Subject: [PATCH 003/106] Revert "serial: 8250_dw: Allow hardware flow control
+ to be used"
+
+This reverts commit 6a171b29937984a5e0bf29d6577b055998f03edb.
+Enabling hardware flow control on Baikal-M UART garbles the console.
+---
+ drivers/tty/serial/8250/8250_dw.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/tty/serial/8250/8250_dw.c b/drivers/tty/serial/8250/8250_dw.c
+index a3a0154da567..00ba2b6f2a16 100644
+--- a/drivers/tty/serial/8250/8250_dw.c
++++ b/drivers/tty/serial/8250/8250_dw.c
+@@ -350,6 +350,9 @@ static void dw8250_set_termios(struct uart_port *p, struct ktermios *termios,
+ 	}
+ 	clk_prepare_enable(d->clk);
+ 
++	//if (!ret)
++	//	p->uartclk = rate;
++
+ 	p->status &= ~UPSTAT_AUTOCTS;
+ 	if (termios->c_cflag & CRTSCTS)
+ 		p->status |= UPSTAT_AUTOCTS;
+@@ -426,9 +429,13 @@ static void dw8250_quirks(struct uart_port *p, struct dw8250_data *data)
+ 		data->uart_16550_compatible = true;
+ 	}
+ 
++	if (has_acpi_companion(p->dev))
++		p->set_termios = dw8250_set_termios;
++
+ 	/* Platforms with iDMA 64-bit */
+ 	if (platform_get_resource_byname(to_platform_device(p->dev),
+ 					 IORESOURCE_MEM, "lpss_priv")) {
++		p->set_termios = dw8250_set_termios;
+ 		data->data.dma.rx_param = p->dev->parent;
+ 		data->data.dma.tx_param = p->dev->parent;
+ 		data->data.dma.fn = dw8250_idma_filter;
+@@ -467,7 +474,6 @@ static int dw8250_probe(struct platform_device *pdev)
+ 	p->serial_in	= dw8250_serial_in;
+ 	p->serial_out	= dw8250_serial_out;
+ 	p->set_ldisc	= dw8250_set_ldisc;
+-	p->set_termios	= dw8250_set_termios;
+ 
+ 	p->membase = devm_ioremap(dev, regs->start, resource_size(regs));
+ 	if (!p->membase)
+-- 
+2.33.0
+

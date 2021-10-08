@@ -1,0 +1,119 @@
+From cc906ec2384079735be330bc81b8237bf0549712 Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Fri, 8 Oct 2021 04:19:27 +0300
+Subject: [PATCH 106/106] Add device tree properties and driver code to
+ configure RTL8211F PHY LEDs
+
+---
+ drivers/net/phy/realtek.c                     | 44 +++++++++++++++++++
+ .../dt-bindings/net/realtek-phy-rtl8211f.h    | 25 +++++++++++
+ 2 files changed, 69 insertions(+)
+ create mode 100644 include/dt-bindings/net/realtek-phy-rtl8211f.h
+
+diff --git a/drivers/net/phy/realtek.c b/drivers/net/phy/realtek.c
+index 7b99a3234c65..e9498fafa8b8 100644
+--- a/drivers/net/phy/realtek.c
++++ b/drivers/net/phy/realtek.c
+@@ -11,6 +11,8 @@
+ #include <linux/phy.h>
+ #include <linux/module.h>
+ #include <linux/delay.h>
++#include <linux/of.h>
++#include <dt-bindings/net/realtek-phy-rtl8211f.h>
+ 
+ #define RTL821x_PHYSR				0x11
+ #define RTL821x_PHYSR_DUPLEX			BIT(13)
+@@ -47,6 +49,7 @@
+ #define RTL8201F_ISR_MASK			(RTL8201F_ISR_ANERR | \
+ 						 RTL8201F_ISR_DUPLEX | \
+ 						 RTL8201F_ISR_LINK)
++#define RTL8211F_LCR_MASK			0xef7b
+ #define RTL8201F_IER				0x13
+ 
+ #define RTL8366RB_POWER_SAVE			0x15
+@@ -292,10 +295,51 @@ static int rtl8211c_config_init(struct phy_device *phydev)
+ static int rtl8211f_config_init(struct phy_device *phydev)
+ {
+ 	struct device *dev = &phydev->mdio.dev;
++	const struct device_node *of_node = dev->of_node;
++
++	/* Default LED configuration values from RTL8211F datasheet */
++	u8 led_mode = RTL8211F_LED_MODE_A;
++	u8 led0_ctrl = RTL8211F_LINK10_ACT;
++	u8 led1_ctrl = RTL8211F_LINK100_ACT;
++	u8 led2_ctrl = RTL8211F_LINK1000_ACT;
++	static const uint8_t lcr_values[] = {
++		0x1b, 0x0b, 0x13, 0x03, 0x19, 0x09, 0x11,
++		0x01, 0x1a, 0x0a, 0x12, 0x02, 0x18, 0x08
++	};
+ 	u16 val_txdly, val_rxdly;
++	u16 val_lcr;
+ 	u16 val;
+ 	int ret;
+ 
++	of_property_read_u8(of_node, "realtek,led-mode", &led_mode);
++	of_property_read_u8(of_node, "realtek,led0-control", &led0_ctrl);
++	of_property_read_u8(of_node, "realtek,led1-control", &led1_ctrl);
++	of_property_read_u8(of_node, "realtek,led2-control", &led2_ctrl);
++
++	if (led_mode == RTL8211F_LED_MODE_B)
++		val_lcr |= (1<<15);
++
++	if (led0_ctrl <= RTL8211F_LINK1000)
++		val_lcr |= lcr_values[led0_ctrl];
++
++	if (led1_ctrl <= RTL8211F_LINK1000)
++		val_lcr |= (lcr_values[led1_ctrl]<<5);
++
++	if (led2_ctrl <= RTL8211F_LINK1000)
++		val_lcr |= (lcr_values[led2_ctrl]<<10);
++
++	ret = phy_modify_paged_changed(phydev, 0xd04, 0x10,
++	                               RTL8211F_LCR_MASK, val_lcr);
++	if (ret < 0) {
++		dev_err(dev, "Failed to update the LED control register\n");
++		return ret;
++	} else if (ret) {
++		dev_dbg(dev, "Updating LED control register to %x\n", val_lcr);
++	} else {
++		dev_dbg(dev, "LED control was already set to %x by pin-strappings\n",
++		        val_lcr);
++	}
++
+ 	val = RTL8211F_ALDPS_ENABLE | RTL8211F_ALDPS_PLL_OFF | RTL8211F_ALDPS_XTAL_OFF;
+ 	phy_modify_paged_changed(phydev, 0xa43, RTL8211F_PHYCR1, val, val);
+ 
+diff --git a/include/dt-bindings/net/realtek-phy-rtl8211f.h b/include/dt-bindings/net/realtek-phy-rtl8211f.h
+new file mode 100644
+index 000000000000..4b6ea549f9c7
+--- /dev/null
++++ b/include/dt-bindings/net/realtek-phy-rtl8211f.h
+@@ -0,0 +1,25 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef _DT_BINDINGS_REALTEK_PHY_RTL8211F_H
++#define _DT_BINDINGS_REALTEK_PHY_RTL8211F_H
++
++/* LED modes for RTL8211F PHY */
++
++#define RTL8211F_LED_MODE_A 0
++#define RTL8211F_LED_MODE_B 1
++
++#define RTL8211F_LINK10_100_1000_ACT 0
++#define RTL8211F_LINK10_100_1000     1
++#define RTL8211F_LINK10_100_ACT      2
++#define RTL8211F_LINK10_100          3
++#define RTL8211F_LINK10_1000_ACT     4
++#define RTL8211F_LINK10_1000         5
++#define RTL8211F_LINK10_ACT          6
++#define RTL8211F_LINK10              7
++#define RTL8211F_LINK100_1000_ACT    8
++#define RTL8211F_LINK100_1000        9
++#define RTL8211F_LINK100_ACT         10
++#define RTL8211F_LINK100             11
++#define RTL8211F_LINK1000_ACT        12
++#define RTL8211F_LINK1000            13
++
++#endif
+-- 
+2.33.0
+

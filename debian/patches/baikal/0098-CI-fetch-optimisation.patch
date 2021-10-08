@@ -1,0 +1,75 @@
+From 2ccc7c8f2a61bcf2648ee43ce3770e975de8eb07 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=9A=D0=B8=D1=80=D0=B8=D0=BA=20=D0=9A=D0=BE=D0=BD=D1=81?=
+ =?UTF-8?q?=D1=82=D0=B0=D0=BD=D1=82=D0=B8=D0=BD=20=D0=90=D0=BD=D0=B4=D1=80?=
+ =?UTF-8?q?=D0=B5=D0=B5=D0=B2=D0=B8=D1=87?= <smlcx.mail@gmail.com>
+Date: Thu, 7 Oct 2021 05:45:32 +0000
+Subject: [PATCH 098/106] CI fetch optimisation
+
+---
+ .gitlab-ci.yml | 36 +++++++++++++++++++++++++++---------
+ 1 file changed, 27 insertions(+), 9 deletions(-)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 9957621ea489..2af0cdef9e90 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -3,11 +3,12 @@ variables:
+ 
+ .build-kernel:
+   stage: build
+-  image: $CI_REGISTRY/containers/common-kernel-builder:0-0-2
++  image: $CI_REGISTRY/containers/common-kernel-builder:0-0-3
+   variables:
+     DEFCONFIG: defconfig
+     BOARD: bm
+     GITPORT: 766
++    PRJ_TOKEN: "2co99Xgzxbs23s7Wa_yJ"
+   tags:
+     - x86_64
+   before_script:
+@@ -26,17 +27,34 @@ variables:
+     - ssh-keyscan -p $GITPORT -H "${CI_SERVER_HOST}" >> ~/.ssh/known_hosts
+     - git init # step 3 : fetch
+     - git remote add origin ssh://git@${CI_SERVER_HOST}:$GITPORT/${CI_PROJECT_PATH}.git
+-    - git fetch origin "${CI_COMMIT_SHA}" --depth 200
++    - git fetch origin "${CI_COMMIT_SHA}" --depth 1
+     - git reset --hard FETCH_HEAD
+-    - git fetch --tags
+   script:
+     - ARCH=arm64 make $DEFCONFIG
+-    - SKIP=$(git describe --tags --no-abbrev | wc -m)
+-    - GIT_TAG=$(git describe --tags)
+-    - REV_COUNT=$(git describe --tags | cut -c ${SKIP}- | sed -E 's/\-([0-9]+)\-.*/\1/')
+-    - VERSION=$(cat Makefile  | grep "^VERSION =" | sed -E 's/^VERSION = ([0-9]+)$/\1/')
+-    - PATCHLEVEL=$(cat Makefile  | grep "^PATCHLEVEL =" | sed -E 's/^PATCHLEVEL = ([0-9]+)$/\1/')
+-    - SUBLEVEL=$(cat Makefile  | grep "^SUBLEVEL =" | sed -E 's/^SUBLEVEL = ([0-9]+)$/\1/')
++    - |
++      MAX_REVS=1000
++      REV_COUNT=0
++      COMMIT_SHA=$CI_COMMIT_SHA
++      while [ $REV_COUNT -le $MAX_REVS ]; do
++        GIT_TAG=$(curl -sH "PRIVATE-TOKEN: $PRJ_TOKEN" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/commits/${COMMIT_SHA}/refs?type=tag" | jq -r '.[0].name')
++        if [ "$GIT_TAG" == "null" ]; then # tags missing
++          COMMIT_SHA=$(curl -sH "PRIVATE-TOKEN: $PRJ_TOKEN" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/repository/commits/${COMMIT_SHA}" | jq -r '.parent_ids[0]')
++          if [ "$COMMIT_SHA" == "null" ]; then # no parent commits
++            echo "The end of history reached but no tags found"
++            exit -1
++          fi
++        else # tag found
++          break
++        fi
++        ((REV_COUNT=REV_COUNT+1))
++      done
++      if [ "$GIT_TAG" == "null" ]; then
++        echo "The max revs count reached but no tags found"
++        exit -1
++      fi
++    - VERSION=$(cat Makefile | grep "^VERSION =" | sed -E 's/^VERSION = ([0-9]+)$/\1/')
++    - PATCHLEVEL=$(cat Makefile | grep "^PATCHLEVEL =" | sed -E 's/^PATCHLEVEL = ([0-9]+)$/\1/')
++    - SUBLEVEL=$(cat Makefile | grep "^SUBLEVEL =" | sed -E 's/^SUBLEVEL = ([0-9]+)$/\1/')
+     - VSTR="${VERSION}.${PATCHLEVEL}.${SUBLEVEL}"
+     - echo "Building ${VSTR}"
+     - ARCH=arm64 CROSS_COMPILE=/usr/bin/aarch64-linux-gnu- make EXTRAVERSION="-${REV_COUNT}" LOCALVERSION="-${BOARD}" deb-pkg -j $(nproc)
+-- 
+2.33.0
+

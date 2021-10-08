@@ -1,0 +1,82 @@
+From 80ce578394330ed65a5e59cd13d6b842ec1687b2 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitaliy.miniakhmetov@elpitech.ru>
+Date: Fri, 1 Oct 2021 12:31:52 +0500
+Subject: [PATCH 094/106] Baikal-M: Enabled ARM_CCN support and added ccn node
+ to device-tree
+
+---
+ arch/arm64/boot/dts/baikal/bm-soc.dtsi               | 6 ++++++
+ arch/arm64/configs/edelweiss_e107_mb_a0_defconfig    | 1 +
+ arch/arm64/configs/edelweiss_tf307_mb_d_defconfig    | 1 +
+ arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig | 1 +
+ arch/arm64/configs/tp_baikal_defconfig               | 1 +
+ 5 files changed, 10 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-soc.dtsi b/arch/arm64/boot/dts/baikal/bm-soc.dtsi
+index bac3b6cb9227..fbf8b535f2ef 100644
+--- a/arch/arm64/boot/dts/baikal/bm-soc.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-soc.dtsi
+@@ -383,6 +383,12 @@ pcie2: pcie@2220000 {
+ 			status = "disabled";
+ 		};
+ 
++		ccn: ccn@9000000 {
++			compatible = "arm,ccn-504";
++			reg = <0x0 0x9000000 0 0x1000000>;
++			interrupts = <GIC_SPI 127 IRQ_TYPE_LEVEL_HIGH>;
++		};
++
+ 		/* PVT_0: PVT0 (28200000, 10000, SPI_151_H) */
+ 		pvt0: pvt0@28200000 {
+ 			compatible = "baikal,pvt";
+diff --git a/arch/arm64/configs/edelweiss_e107_mb_a0_defconfig b/arch/arm64/configs/edelweiss_e107_mb_a0_defconfig
+index 82a9f40c7c0c..443392c72516 100644
+--- a/arch/arm64/configs/edelweiss_e107_mb_a0_defconfig
++++ b/arch/arm64/configs/edelweiss_e107_mb_a0_defconfig
+@@ -213,6 +213,7 @@ CONFIG_ARM_SMMU_V3=y
+ CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
+ CONFIG_NTB=m
+ CONFIG_NTB_TRANSPORT=m
++CONFIG_ARM_CCN=y
+ CONFIG_EXT4_FS=y
+ CONFIG_EXT4_FS_POSIX_ACL=y
+ CONFIG_EXT4_FS_SECURITY=y
+diff --git a/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig b/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig
+index 5ae3ebe03dfd..58b5684a6318 100644
+--- a/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig
++++ b/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig
+@@ -401,6 +401,7 @@ CONFIG_ARM_SMMU_V3=y
+ CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
+ CONFIG_NTB=m
+ CONFIG_NTB_TRANSPORT=m
++CONFIG_ARM_CCN=y
+ CONFIG_EXT4_FS=y
+ CONFIG_EXT4_FS_POSIX_ACL=y
+ CONFIG_EXT4_FS_SECURITY=y
+diff --git a/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig b/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig
+index 5ae3ebe03dfd..58b5684a6318 100644
+--- a/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig
++++ b/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig
+@@ -401,6 +401,7 @@ CONFIG_ARM_SMMU_V3=y
+ CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
+ CONFIG_NTB=m
+ CONFIG_NTB_TRANSPORT=m
++CONFIG_ARM_CCN=y
+ CONFIG_EXT4_FS=y
+ CONFIG_EXT4_FS_POSIX_ACL=y
+ CONFIG_EXT4_FS_SECURITY=y
+diff --git a/arch/arm64/configs/tp_baikal_defconfig b/arch/arm64/configs/tp_baikal_defconfig
+index 94f4247c6b69..6a444d424d41 100644
+--- a/arch/arm64/configs/tp_baikal_defconfig
++++ b/arch/arm64/configs/tp_baikal_defconfig
+@@ -783,6 +783,7 @@ CONFIG_ARM_SMMU_V3=y
+ CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
+ CONFIG_NTB=m
+ CONFIG_NTB_TRANSPORT=m
++CONFIG_ARM_CCN=y
+ CONFIG_EXT4_FS=y
+ CONFIG_EXT4_FS_POSIX_ACL=y
+ CONFIG_EXT4_FS_SECURITY=y
+-- 
+2.33.0
+

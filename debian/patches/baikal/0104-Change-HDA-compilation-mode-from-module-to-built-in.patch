@@ -1,0 +1,35 @@
+From 2284dfc8ac8712267a5ad307cceb0c23255441ef Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Wed, 6 Oct 2021 02:28:03 +0300
+Subject: [PATCH 104/106] Change HDA compilation mode from module to built-in
+
+---
+ arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig b/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig
+index 6d220883a20c..a3a15e6e9015 100644
+--- a/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig
++++ b/arch/arm64/configs/elpitech_et101_mb_a1_a2_defconfig
+@@ -346,8 +346,8 @@ CONFIG_FRAMEBUFFER_CONSOLE=y
+ CONFIG_LOGO=y
+ CONFIG_SOUND=y
+ CONFIG_SND=y
+-CONFIG_SND_HDA_BAIKAL_M=m
+-CONFIG_SND_HDA_CODEC_REALTEK=m
++CONFIG_SND_HDA_BAIKAL_M=y
++CONFIG_SND_HDA_CODEC_REALTEK=y
+ CONFIG_SND_USB_AUDIO=m
+ CONFIG_SND_SOC=y
+ CONFIG_SND_DESIGNWARE_I2S=y
+@@ -378,7 +378,6 @@ CONFIG_MMC=y
+ CONFIG_MMC_SDHCI=y
+ CONFIG_MMC_SDHCI_PLTFM=y
+ CONFIG_MMC_SDHCI_OF_DWCMSHC=y
+-CONFIG_LEDS_CLASS=y
+ CONFIG_LEDS_GPIO=y
+ CONFIG_LEDS_USER=y
+ CONFIG_LEDS_TRIGGER_HEARTBEAT=y
+-- 
+2.33.0
+

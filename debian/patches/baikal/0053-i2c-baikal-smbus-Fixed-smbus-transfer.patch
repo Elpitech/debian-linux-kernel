@@ -1,0 +1,136 @@
+From a1367732e25ed6177826729dbf2d5cca647c9187 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 17 Jun 2021 12:25:52 +0500
+Subject: [PATCH 053/106] i2c-baikal-smbus: Fixed smbus transfer
+
+---
+ drivers/i2c/busses/i2c-baikal-smbus.c | 49 ++++++++++++++++++---------
+ 1 file changed, 33 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-baikal-smbus.c b/drivers/i2c/busses/i2c-baikal-smbus.c
+index 85d00994ea8f..e8d608830084 100644
+--- a/drivers/i2c/busses/i2c-baikal-smbus.c
++++ b/drivers/i2c/busses/i2c-baikal-smbus.c
+@@ -37,6 +37,7 @@
+ #define BE_ISR1_MASK		0x7f
+ #define BE_ISR1_FER		BIT(2)
+ #define BE_ISR1_RNK		BIT(3)
++#define BE_ISR1_ALD		BIT(4)
+ #define BE_ISR1_TCS		BIT(6)
+ 
+ #define BE_SMBUS_IMR1		0x24
+@@ -99,9 +100,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 		writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 		while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-			!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++					 !(readl(besmb->base + BE_SMBUS_ISR1) &
++						 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-		if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++		if (readl(besmb->base + BE_SMBUS_ISR1) &
++				(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 			ret = -ENXIO;
+ 			goto exit;
+ 		}
+@@ -136,9 +139,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 		writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 		while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-			!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++					 !(readl(besmb->base + BE_SMBUS_ISR1) &
++						 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-		if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++		if (readl(besmb->base + BE_SMBUS_ISR1) &
++				(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 			ret = -ENXIO;
+ 			goto exit;
+ 		}
+@@ -150,9 +155,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 			writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 			while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-				!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++						 !(readl(besmb->base + BE_SMBUS_ISR1) &
++							 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-			if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++			if (readl(besmb->base + BE_SMBUS_ISR1) &
++					(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 				ret = -ENXIO;
+ 				goto exit;
+ 			}
+@@ -188,9 +195,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 		writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 		while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-			!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++					 !(readl(besmb->base + BE_SMBUS_ISR1) &
++						 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-		if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++		if (readl(besmb->base + BE_SMBUS_ISR1) &
++				(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 			ret = -ENXIO;
+ 			goto exit;
+ 		}
+@@ -202,9 +211,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 			writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 			while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-				!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++						 !(readl(besmb->base + BE_SMBUS_ISR1) &
++							 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-			if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++			if (readl(besmb->base + BE_SMBUS_ISR1) &
++					(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 				ret = -ENXIO;
+ 				goto exit;
+ 			}
+@@ -261,9 +272,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 				writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 				while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-					!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++							 !(readl(besmb->base + BE_SMBUS_ISR1) &
++								 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-				if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++				if (readl(besmb->base + BE_SMBUS_ISR1) &
++						(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 					ret = -ENXIO;
+ 					goto exit;
+ 				}
+@@ -277,9 +290,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 			writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 			while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-				!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++						 !(readl(besmb->base + BE_SMBUS_ISR1) &
++							 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-			if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++			if (readl(besmb->base + BE_SMBUS_ISR1) &
++					(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 				ret = -ENXIO;
+ 				goto exit;
+ 			}
+@@ -294,9 +309,11 @@ static int be_smbus_xfer(struct i2c_adapter *adap, u16 addr,
+ 				writel(BE_CR2_FTE, besmb->base + BE_SMBUS_CR2);
+ 
+ 				while ((readl(besmb->base + BE_SMBUS_CR2) & BE_CR2_FTE) &&
+-					!(readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_TCS));
++							 !(readl(besmb->base + BE_SMBUS_ISR1) &
++								 (BE_ISR1_TCS | BE_ISR1_ALD | BE_ISR1_RNK)));
+ 
+-				if (readl(besmb->base + BE_SMBUS_ISR1) & BE_ISR1_RNK) {
++				if (readl(besmb->base + BE_SMBUS_ISR1) &
++						(BE_ISR1_ALD | BE_ISR1_RNK)) {
+ 					ret = -ENXIO;
+ 					goto exit;
+ 				}
+-- 
+2.33.0
+

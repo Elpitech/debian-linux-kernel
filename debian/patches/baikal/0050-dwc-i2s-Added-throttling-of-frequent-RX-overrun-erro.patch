@@ -1,0 +1,36 @@
+From 4291cfc62101c38761bcb276d6750a23bcdf13ca Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 17 Jun 2021 11:32:56 +0500
+Subject: [PATCH 050/106] dwc-i2s: Added throttling of frequent RX overrun
+ errors
+
+---
+ sound/soc/dwc/dwc-i2s.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/dwc/dwc-i2s.c b/sound/soc/dwc/dwc-i2s.c
+index f5b543deed79..445b687be26f 100644
+--- a/sound/soc/dwc/dwc-i2s.c
++++ b/sound/soc/dwc/dwc-i2s.c
+@@ -100,6 +100,7 @@ static inline void i2s_enable_irqs(struct dw_i2s_dev *dev, u32 stream,
+ 
+ static irqreturn_t i2s_irq_handler(int irq, void *dev_id)
+ {
++	static int rxor_count;
+ 	struct dw_i2s_dev *dev = dev_id;
+ 	bool irq_valid = false;
+ 	u32 isr[4];
+@@ -138,7 +139,9 @@ static irqreturn_t i2s_irq_handler(int irq, void *dev_id)
+ 
+ 		/* Error Handling: TX */
+ 		if (isr[i] & ISR_RXFO) {
+-			dev_err(dev->dev, "RX overrun (ch_id=%d)\n", i);
++			if ((rxor_count % 1000) == 0)
++				dev_err(dev->dev, "RX overrun (ch_id=%d)\n", i);
++			rxor_count++;
+ 			irq_valid = true;
+ 		}
+ 	}
+-- 
+2.33.0
+

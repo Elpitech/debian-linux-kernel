@@ -1,0 +1,56 @@
+From 7c61048200a0bc21e4785b85803ffeb12d4f687e Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 17 Jun 2021 11:20:26 +0500
+Subject: [PATCH 047/106] dwc-i2s: Removed setting system clock frequency
+
+---
+ sound/soc/dwc/dwc-i2s.c | 12 ------------
+ 1 file changed, 12 deletions(-)
+
+diff --git a/sound/soc/dwc/dwc-i2s.c b/sound/soc/dwc/dwc-i2s.c
+index 783dd534c967..85b3466a1555 100644
+--- a/sound/soc/dwc/dwc-i2s.c
++++ b/sound/soc/dwc/dwc-i2s.c
+@@ -26,9 +26,6 @@
+ #include <sound/dmaengine_pcm.h>
+ #include "local.h"
+ 
+-#define MASTER_CLK 12000000
+-static uint32_t freq;
+-
+ static inline void i2s_write_reg(void __iomem *io_base, int reg, u32 val)
+ {
+ 	writel(val, io_base + reg);
+@@ -206,9 +203,6 @@ static int dw_i2s_startup(struct snd_pcm_substream *substream,
+ 		dma_data = &dev->capture_dma_data;
+ 
+ 	snd_soc_dai_set_dma_data(cpu_dai, substream, (void *)dma_data);
+-	snd_soc_dai_set_sysclk(cpu_dai, 0,
+-                             freq, SND_SOC_CLOCK_IN);
+-
+ 
+ 	return 0;
+ }
+@@ -658,8 +652,6 @@ static int dw_i2s_probe(struct platform_device *pdev)
+ 	int ret, irq, irq_num;
+ 	struct snd_soc_dai_driver *dw_i2s_dai;
+ 	const char *clk_id;
+-	struct device_node *np = pdev->dev.of_node;
+-	uint32_t val;
+ 
+ 	dev = devm_kzalloc(&pdev->dev, sizeof(*dev), GFP_KERNEL);
+ 	if (!dev)
+@@ -758,10 +750,6 @@ static int dw_i2s_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	pm_runtime_enable(&pdev->dev);
+-        if (!of_property_read_u32(np, "system-clock-frequency", &val))
+-                freq = val;
+-        else
+-                freq = MASTER_CLK;
+ 
+ 	return 0;
+ 
+-- 
+2.33.0
+

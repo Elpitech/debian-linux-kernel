@@ -1,0 +1,38 @@
+From 2a23a209af74960f5fd55b32f8fc08c1415b8c7a Mon Sep 17 00:00:00 2001
+From: Miniakhmetov Vitaly <vitalii.miniakhmetov@t-platforms.ru>
+Date: Wed, 19 May 2021 20:44:13 +0500
+Subject: [PATCH 036/106] Rename mitx/mitx-d to its proper names tf307-mb-s-c/d
+
+---
+ arch/arm64/boot/dts/baikal/Makefile                           | 4 ++--
+ .../dts/baikal/{bm-mbm10.dts => edelweiss-tf307-mb-s-c.dts}   | 0
+ .../dts/baikal/{bm-mbm20.dts => edelweiss-tf307-mb-s-d.dts}   | 0
+ 3 files changed, 2 insertions(+), 2 deletions(-)
+ rename arch/arm64/boot/dts/baikal/{bm-mbm10.dts => edelweiss-tf307-mb-s-c.dts} (100%)
+ rename arch/arm64/boot/dts/baikal/{bm-mbm20.dts => edelweiss-tf307-mb-s-d.dts} (100%)
+
+diff --git a/arch/arm64/boot/dts/baikal/Makefile b/arch/arm64/boot/dts/baikal/Makefile
+index 9729c6e3d4f3..8e39db726906 100644
+--- a/arch/arm64/boot/dts/baikal/Makefile
++++ b/arch/arm64/boot/dts/baikal/Makefile
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ dtb-$(CONFIG_ARCH_BAIKAL) += bm-dbm.dtb
+-dtb-$(CONFIG_ARCH_BAIKAL) += bm-mbm10.dtb
+-dtb-$(CONFIG_ARCH_BAIKAL) += bm-mbm20.dtb
++dtb-$(CONFIG_ARCH_BAIKAL) += edelweiss-tf307-mb-s-c.dtb
++dtb-$(CONFIG_ARCH_BAIKAL) += edelweiss-tf307-mb-s-d.dtb
+ dtb-$(CONFIG_ARCH_BAIKAL) += bm-qemu.dtb
+ 
+ always		:= $(dtb-y)
+diff --git a/arch/arm64/boot/dts/baikal/bm-mbm10.dts b/arch/arm64/boot/dts/baikal/edelweiss-tf307-mb-s-c.dts
+similarity index 100%
+rename from arch/arm64/boot/dts/baikal/bm-mbm10.dts
+rename to arch/arm64/boot/dts/baikal/edelweiss-tf307-mb-s-c.dts
+diff --git a/arch/arm64/boot/dts/baikal/bm-mbm20.dts b/arch/arm64/boot/dts/baikal/edelweiss-tf307-mb-s-d.dts
+similarity index 100%
+rename from arch/arm64/boot/dts/baikal/bm-mbm20.dts
+rename to arch/arm64/boot/dts/baikal/edelweiss-tf307-mb-s-d.dts
+-- 
+2.33.0
+

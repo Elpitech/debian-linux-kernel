@@ -1,0 +1,213 @@
+From 2196380fc351d3ef9fad2299692feed10d2ea7b5 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 1 Jul 2021 19:40:59 +0500
+Subject: [PATCH 071/106] baikal-vdu: Ported to Linux >= 5.10
+
+---
+ drivers/gpu/drm/baikal/baikal-hdmi.c          |  5 +--
+ drivers/gpu/drm/baikal/baikal_vdu_connector.c | 21 +++++------
+ drivers/gpu/drm/baikal/baikal_vdu_crtc.c      |  4 +--
+ drivers/gpu/drm/baikal/baikal_vdu_debugfs.c   |  4 +--
+ drivers/gpu/drm/baikal/baikal_vdu_drm.h       |  2 +-
+ drivers/gpu/drm/baikal/baikal_vdu_drv.c       | 36 +++----------------
+ 6 files changed, 21 insertions(+), 51 deletions(-)
+
+diff --git a/drivers/gpu/drm/baikal/baikal-hdmi.c b/drivers/gpu/drm/baikal/baikal-hdmi.c
+index 757b84086cd4..0fae3f758f61 100644
+--- a/drivers/gpu/drm/baikal/baikal-hdmi.c
++++ b/drivers/gpu/drm/baikal/baikal-hdmi.c
+@@ -52,8 +52,9 @@ static const struct dw_hdmi_phy_config baikal_hdmi_phy_cfg[] = {
+ 	{ ~0UL,      0x0000, 0x0000, 0x0000}
+ };
+ 
+-static enum drm_mode_status baikal_hdmi_mode_valid(struct drm_connector *con,
+-                          const struct drm_display_mode *mode)
++static enum drm_mode_status baikal_hdmi_mode_valid(struct dw_hdmi *hdmi, void *data,
++					const struct drm_display_info *info,
++					const struct drm_display_mode *mode)
+ {
+ 	if (mode->clock < 13500)
+ 		return MODE_CLOCK_LOW;
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_connector.c b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+index 805e6e17ec3f..a2b6d85c62e6 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_connector.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_connector.c
+@@ -35,12 +35,6 @@
+ 
+ static void baikal_vdu_connector_destroy(struct drm_connector *connector)
+ {
+-	struct baikal_vdu_private *priv =
+-		to_baikal_vdu_private(connector);
+-
+-	if (priv->panel)
+-		drm_panel_detach(priv->panel);
+-
+ 	drm_connector_unregister(connector);
+ 	drm_connector_cleanup(connector);
+ }
+@@ -76,7 +70,7 @@ static int baikal_vdu_connector_helper_get_modes(
+ 	if (!priv->panel)
+ 		return 0;
+ 
+-	return drm_panel_get_modes(priv->panel);
++	return drm_panel_get_modes(priv->panel, connector);
+ }
+ 
+ int baikal_vdu_lvds_set_property(struct drm_connector *connector,
+@@ -174,20 +168,21 @@ int baikal_vdu_lvds_connector_create(struct drm_device *dev)
+ 
+ 	drm_connector_init(dev, connector, &connector_funcs,
+ 			DRM_MODE_CONNECTOR_LVDS);
++
++	drm_connector_helper_add(connector, &connector_helper_funcs);
++
+ 	drm_encoder_init(dev, encoder, &encoder_funcs,
+ 			DRM_MODE_ENCODER_LVDS, NULL);
++
++	drm_encoder_helper_add(encoder, &baikal_vdu_lvds_helper_funcs);
++
+ 	encoder->crtc = &priv->crtc;
+-	encoder->possible_crtcs = BIT(drm_crtc_index(encoder->crtc));
++	encoder->possible_crtcs = drm_crtc_mask(encoder->crtc);
+ 
+ 	drm_connector_attach_encoder(connector, encoder);
+ 
+-	drm_encoder_helper_add(encoder, &baikal_vdu_lvds_helper_funcs);
+-	drm_connector_helper_add(connector, &connector_helper_funcs);
+-
+ 	drm_connector_register(connector);
+ 
+-	drm_panel_attach(priv->panel, connector);
+-
+ 	return 0;
+ }
+ 
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+index ee895798ea09..fd5c2709e872 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+@@ -233,7 +233,7 @@ static enum drm_mode_status baikal_vdu_mode_valid(struct drm_crtc *crtc,
+ }
+ 
+ static void baikal_vdu_crtc_helper_enable(struct drm_crtc *crtc,
+-					  struct drm_crtc_state *old_state)
++					  struct drm_atomic_state *old_state)
+ {
+ 	struct baikal_vdu_private *priv = crtc->dev->dev_private;
+ 	struct drm_panel *panel = priv->panel;
+@@ -297,7 +297,7 @@ void baikal_vdu_crtc_helper_disable(struct drm_crtc *crtc)
+ }
+ 
+ static void baikal_vdu_crtc_helper_atomic_flush(struct drm_crtc *crtc,
+-					   struct drm_crtc_state *old_state)
++					   struct drm_atomic_state *old_state)
+ {
+ 	struct drm_pending_vblank_event *event = crtc->state->event;
+ 
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c b/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
+index 31b1a5ba089c..022517e35cac 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_debugfs.c
+@@ -120,13 +120,13 @@ static const struct drm_info_list baikal_vdu_debugfs_list[] = {
+ 	{"regs", baikal_vdu_debugfs_regs, 0},
+ };
+ 
+-int baikal_vdu_debugfs_init(struct drm_minor *minor)
++void baikal_vdu_debugfs_init(struct drm_minor *minor)
+ {
+ 	struct drm_device *dev = minor->dev;
+ 	struct baikal_vdu_private *priv = dev->dev_private;
+ 	debugfs_create_file("htr", S_IWUSR, minor->debugfs_root, priv, &baikal_vdu_rg_fops);
+ 	debugfs_create_file("vtr", S_IWUSR, minor->debugfs_root, priv, &baikal_vdu_rg_fops);
+-	return drm_debugfs_create_files(baikal_vdu_debugfs_list,
++	drm_debugfs_create_files(baikal_vdu_debugfs_list,
+ 					ARRAY_SIZE(baikal_vdu_debugfs_list),
+ 					minor->debugfs_root, minor);
+ }
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drm.h b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+index 24b50f821ac7..135644ef70b5 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_drm.h
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drm.h
+@@ -73,7 +73,7 @@ int baikal_vdu_lvds_connector_create(struct drm_device *dev);
+ int baikal_vdu_backlight_create(struct drm_device *drm);
+ 
+ /* Debugfs functions */
+-int baikal_vdu_debugfs_init(struct drm_minor *minor);
++void baikal_vdu_debugfs_init(struct drm_minor *minor);
+ 
+ /* Worker functions */
+ void baikal_vdu_update_work(struct work_struct *work);
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_drv.c b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+index ee07893c3d57..ba6fb341bf82 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_drv.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_drv.c
+@@ -112,7 +112,6 @@ int baikal_vdu_find_panel_or_bridge(struct device *dev,
+ 	priv->ep_count = ep_count;
+ 
+ 	return drm_of_find_panel_or_bridge(np, 0, 0, panel, bridge);
+-
+ }
+ 
+ static int baikal_vdu_remove_efifb(struct drm_device *dev)
+@@ -172,10 +171,9 @@ static int vdu_modeset_init(struct drm_device *dev)
+ 			goto out_config;
+ 		}
+ 		encoder->crtc = &priv->crtc;
+-		encoder->possible_crtcs = BIT(drm_crtc_index(encoder->crtc));
++		encoder->possible_crtcs = drm_crtc_mask(encoder->crtc);
+ 		priv->bridge->encoder = encoder;
+-		encoder->bridge = priv->bridge;
+-		ret = drm_bridge_attach(encoder, priv->bridge, NULL);
++		ret = drm_bridge_attach(encoder, priv->bridge, NULL, 0);
+ 		if (ret) {
+ 			dev_err(dev->dev, "Failed to attach DRM bridge %d\n", ret);
+ 			goto out_config;
+@@ -235,19 +233,10 @@ static int vdu_modeset_init(struct drm_device *dev)
+ 	return ret;
+ }
+ 
+-static const struct file_operations drm_fops = {
+-	.owner = THIS_MODULE,
+-	.open = drm_open,
+-	.release = drm_release,
+-	.unlocked_ioctl = drm_ioctl,
+-	.mmap = drm_gem_cma_mmap,
+-	.poll = drm_poll,
+-	.read = drm_read,
+-};
++DEFINE_DRM_GEM_CMA_FOPS(drm_fops);
+ 
+ static struct drm_driver vdu_drm_driver = {
+-	.driver_features = DRIVER_GEM |	DRIVER_MODESET | DRIVER_ATOMIC,
+-	.lastclose = drm_fb_helper_lastclose,
++	.driver_features = DRIVER_HAVE_IRQ | DRIVER_GEM |	DRIVER_MODESET | DRIVER_ATOMIC,
+ 	.irq_handler = baikal_vdu_irq,
+ 	.ioctls = NULL,
+ 	.fops = &drm_fops,
+@@ -257,22 +246,7 @@ static struct drm_driver vdu_drm_driver = {
+ 	.major = 1,
+ 	.minor = 0,
+ 	.patchlevel = 0,
+-	.dumb_create = drm_gem_cma_dumb_create,
+-	.dumb_destroy = drm_gem_dumb_destroy,
+-	.dumb_map_offset = drm_gem_dumb_map_offset,
+-	.gem_free_object_unlocked = drm_gem_cma_free_object,
+-	.gem_print_info = drm_gem_cma_print_info,
+-	.gem_vm_ops = &drm_gem_cma_vm_ops,
+-
+-	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
+-	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
+-	.gem_prime_import = drm_gem_prime_import,
+-	.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
+-	.gem_prime_export = drm_gem_prime_export,
+-	.gem_prime_get_sg_table	= drm_gem_cma_prime_get_sg_table,
+-	.gem_prime_mmap = drm_gem_cma_prime_mmap,
+-	.gem_prime_vmap = drm_gem_cma_prime_vmap,
+-
++	DRM_GEM_CMA_DRIVER_OPS,
+ #if defined(CONFIG_DEBUG_FS)
+ 	.debugfs_init = baikal_vdu_debugfs_init,
+ #endif
+-- 
+2.33.0
+

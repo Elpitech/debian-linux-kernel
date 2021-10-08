@@ -1,0 +1,29 @@
+From 458ac7613c37d03d03d1b49895d60fd911cce19c Mon Sep 17 00:00:00 2001
+From: Roman Stavtsev <roman.stavtsev@baikalelectronics.ru>
+Date: Sat, 17 Apr 2021 21:30:38 +0300
+Subject: [PATCH 024/106] tools: add CROSS_COMPILE
+
+---
+ tools/build/Makefile.include | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/tools/build/Makefile.include b/tools/build/Makefile.include
+index 8dadaa0fbb43..fa9a2ff4b409 100644
+--- a/tools/build/Makefile.include
++++ b/tools/build/Makefile.include
+@@ -1,8 +1,12 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ build := -f $(srctree)/tools/build/Makefile.build dir=. obj
+ 
++ifdef CROSS_COMPILE
++fixdep:
++else
+ fixdep:
+ 	$(Q)$(MAKE) -C $(srctree)/tools/build CFLAGS= LDFLAGS= $(OUTPUT)fixdep
++endif
+ 
+ fixdep-clean:
+ 	$(Q)$(MAKE) -C $(srctree)/tools/build clean
+-- 
+2.33.0
+

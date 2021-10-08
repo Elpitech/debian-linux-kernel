@@ -1,0 +1,47 @@
+From 29b1e40dc8fcb7e80281bcc8d29b816f89492c76 Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Thu, 9 Sep 2021 23:32:07 +0300
+Subject: [PATCH 084/106] adm/bmlk#2 Update CI script with new URLs
+
+---
+ .gitlab-ci.yml | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index e1449b543cd8..44f71b85b40a 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -3,10 +3,11 @@ variables:
+ 
+ .build-kernel:
+   stage: build
+-  image: registry.t-platforms.ru/containers/common-kernel-builder:0-0-1
++  image: $CI_REGISTRY/containers/common-kernel-builder:0-0-2
+   variables:
+     DEFCONFIG: defconfig
+     BOARD: bm
++    GITPORT: 766
+   tags:
+     - x86_64
+   before_script:
+@@ -16,14 +17,15 @@ variables:
+     - mkdir -p ~/.ssh # step 2 : set up ssh environment
+     - cat $deploy_id | base64 --decode > ~/.ssh/id_rsa
+     - echo "$deploy_id"
++    - echo "$CI_REGISTRY"
+     - ls -lah $deploy_id
+     - chmod 600 ~/.ssh/ -R
+     - eval "$(ssh-agent -s)"
+     - md5sum ~/.ssh/id_rsa
+     - ssh-add ~/.ssh/id_rsa
+-    - ssh-keyscan -H 'gitlab.t-platforms.ru' >> ~/.ssh/known_hosts
++    - ssh-keyscan -p $GITPORT -H "${CI_SERVER_HOST}" >> ~/.ssh/known_hosts
+     - git init # step 3 : fetch
+-    - git remote add origin ssh://git@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git
++    - git remote add origin ssh://git@${CI_SERVER_HOST}:$GITPORT/${CI_PROJECT_PATH}.git
+     - git fetch origin "${CI_COMMIT_SHA}" --depth 200
+     - git reset --hard FETCH_HEAD
+     - git fetch --tags
+-- 
+2.33.0
+

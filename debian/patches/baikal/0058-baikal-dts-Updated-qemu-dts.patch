@@ -1,0 +1,136 @@
+From 324355fafb374d48d300454b862b16a55d5b7089 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 17 Jun 2021 19:56:02 +0500
+Subject: [PATCH 058/106] baikal-dts: Updated qemu dts
+
+---
+ arch/arm64/boot/dts/baikal/bm-qemu.dts | 93 +++++---------------------
+ 1 file changed, 17 insertions(+), 76 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-qemu.dts b/arch/arm64/boot/dts/baikal/bm-qemu.dts
+index 034af2630afb..3c415a84057d 100644
+--- a/arch/arm64/boot/dts/baikal/bm-qemu.dts
++++ b/arch/arm64/boot/dts/baikal/bm-qemu.dts
+@@ -22,8 +22,6 @@ / {
+ 	chosen {
+ 		stdout-path = "serial0:115200n8";
+ 		bootargs = "root=/dev/ram rw rootwait console=ttyS0,115200n8 earlyprintk=uart8250,mmio32,0x20230000,115200";
+-		/*linux,initrd-start = <0x0 0x80490000>;
+-		linux,initrd-end = <0x0 0x81490000>;*/
+ 	};
+ 
+ 	memory@80000000 {
+@@ -66,26 +64,6 @@ lcd_hdmi_panel: endpoint {
+ 	};*/
+ };
+ 
+-&vdu0 {
+-	port {
+-		vdu_pads: endpoint {
+-			remote-endpoint = <&lcd_panel>;
+-		};
+-	};
+-};
+-
+-&uart0 {
+-	status = "okay";
+-};
+-
+-&sata0 {
+-	status = "okay";
+-};
+-
+-&sata1 {
+-	status = "okay";
+-};
+-
+ &gmac0 {
+ 	status = "okay";
+ };
+@@ -94,62 +72,13 @@ &gmac1 {
+ 	status = "okay";
+ };
+ 
+-/*&i2c0 {
+-	status = "okay";
+-
+-	eeprom@50 {
+-		compatible = "atmel,24c02";
+-		pagesize = <8>;
+-		reg = <0x50>;
+-	};
+-
+-	eeprom@51 {
+-		compatible = "atmel,24c02";
+-		pagesize = <8>;
+-		reg = <0x51>;
+-	};
+-
+-	eeprom@68 {
+-		compatible = "dallas,ds1307";
+-		reg = <0x68>;
+-	};
+-
+-	gpioexp0: gpioexp@20 {
+-		compatible = "nxp,pca9500";
+-		#gpio-cells = <2>;
+-		reg = <0x20>;
+-		gpio-controller;
+-	};
++&sata0 {
++  status = "okay";
+ };
+ 
+-&i2c1 {
+-	status = "okay";
+-
+-	eeprom@50 {
+-		compatible = "atmel,24c02";
+-		pagesize = <8>;
+-		reg = <0x50>;
+-	};
+-
+-	eeprom@51 {
+-		compatible = "atmel,24c02";
+-		pagesize = <8>;
+-		reg = <0x51>;
+-	};
+-
+-	eeprom@54 {
+-		compatible = "atmel,24c02";
+-		pagesize = <8>;
+-		reg = <0x54>;
+-	};
+-
+-	gpioexp1: gpioexp@18 {
+-		compatible = "nxp,pca9500";
+-		#gpio-cells = <2>;
+-		reg = <0x18>;
+-		gpio-controller;
+-	};
+-};*/
++&sata1 {
++  status = "okay";
++};
+ 
+ &spi0 {
+ 	num-cs = <6>;
+@@ -220,3 +149,15 @@ mtd2@00500000 {
+ 		};
+ 	};
+ };
++
++&uart0 {
++  status = "okay";
++};
++
++&vdu0 {
++  port {
++    vdu_pads: endpoint {
++      remote-endpoint = <&lcd_panel>;
++    };
++  };
++};
+-- 
+2.33.0
+

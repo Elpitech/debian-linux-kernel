@@ -1,0 +1,25 @@
+From 604871a0618196a4bdbe6f0a38128ab195f75c23 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitaliy.miniakhmetov@elpitech.ru>
+Date: Fri, 1 Oct 2021 12:25:42 +0500
+Subject: [PATCH 093/106] dts: Fixed DBM i2s reset
+
+---
+ arch/arm64/boot/dts/baikal/bm-dbm.dts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-dbm.dts b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+index 0f68c88f5028..402e35c5b826 100644
+--- a/arch/arm64/boot/dts/baikal/bm-dbm.dts
++++ b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+@@ -126,7 +126,7 @@ tlv320aic3x: tlv320aic3x@18 {
+ 		#sound-dai-cells = <0>;
+ 		compatible = "ti,tlv320aic3x";
+ 		reg = <0x18>;
+-		gpio-reset = <&porta 4 GPIO_ACTIVE_LOW>;
++		reset-gpios = <&porta 4 GPIO_ACTIVE_LOW>;
+ 		status = "okay";
+ 		ai3x-micbias-vg = <1>;
+ 		ai3x-ocmv = <1>;
+-- 
+2.33.0
+

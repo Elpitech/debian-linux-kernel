@@ -1,0 +1,49 @@
+From 2a3c5047dbd76f2062b3a8de04071702f232ad9f Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 17 Jun 2021 11:07:53 +0500
+Subject: [PATCH 046/106] tlv320aic3x: Fix for gpio reset
+
+---
+ arch/arm64/boot/dts/baikal/bm-dbm.dts | 4 ++--
+ sound/soc/codecs/tlv320aic3x.c        | 3 +++
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-dbm.dts b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+index 68b846962d8e..14fb886bf618 100644
+--- a/arch/arm64/boot/dts/baikal/bm-dbm.dts
++++ b/arch/arm64/boot/dts/baikal/bm-dbm.dts
+@@ -6,7 +6,6 @@
+ 
+ /dts-v1/;
+ 
+-#include <dt-bindings/sound/tlv320aic31xx-micbias.h>
+ #include "bm-soc.dtsi"
+ #include "bm-mali.dtsi"
+ 
+@@ -102,7 +101,8 @@ tlv320aic3x: tlv320aic3x@18 {
+ 		reg = <0x18>;
+ 		gpio-reset = <&porta 4 GPIO_ACTIVE_LOW>;
+ 		status = "okay";
+-		ai31xx-micbias-vg = <MICBIAS_2_0V>;
++		ai3x-micbias-vg = <1>;
++		ai3x-ocmv = <1>;
+ 	};
+ 
+ 	rtc@56 {
+diff --git a/sound/soc/codecs/tlv320aic3x.c b/sound/soc/codecs/tlv320aic3x.c
+index 7731593a5509..9a5629399b24 100644
+--- a/sound/soc/codecs/tlv320aic3x.c
++++ b/sound/soc/codecs/tlv320aic3x.c
+@@ -1829,6 +1829,9 @@ int aic3x_probe(struct device *dev, struct regmap *regmap, kernel_ulong_t driver
+ 		if (ret != 0)
+ 			goto err;
+ 		gpio_direction_output(aic3x->gpio_reset, 0);
++
++		udelay(100);
++		gpio_set_value(aic3x->gpio_reset, 1);
+ 	}
+ 
+ 	for (i = 0; i < ARRAY_SIZE(aic3x->supplies); i++)
+-- 
+2.33.0
+

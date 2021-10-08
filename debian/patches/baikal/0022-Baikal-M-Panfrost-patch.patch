@@ -1,0 +1,215 @@
+From 09f75d9ba1c752cc7e4048d01816a8de2e5086b7 Mon Sep 17 00:00:00 2001
+From: Roman Stavtsev <roman.stavtsev@baikalelectronics.ru>
+Date: Sat, 17 Apr 2021 18:53:43 +0300
+Subject: [PATCH 022/106] Baikal-M: Panfrost patch
+
+---
+ drivers/gpu/drm/panfrost/panfrost_gpu.c | 45 +++++++++++++++----------
+ drivers/gpu/drm/panfrost/panfrost_job.c |  6 ++--
+ drivers/gpu/drm/panfrost/panfrost_mmu.c | 42 +++++++++++++++++++++--
+ 3 files changed, 72 insertions(+), 21 deletions(-)
+
+diff --git a/drivers/gpu/drm/panfrost/panfrost_gpu.c b/drivers/gpu/drm/panfrost/panfrost_gpu.c
+index 2aae636f1cf5..71a19205d3db 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_gpu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_gpu.c
+@@ -63,7 +63,7 @@ int panfrost_gpu_soft_reset(struct panfrost_device *pfdev)
+ 	gpu_write(pfdev, GPU_CMD, GPU_CMD_SOFT_RESET);
+ 
+ 	ret = readl_relaxed_poll_timeout(pfdev->iomem + GPU_INT_RAWSTAT,
+-		val, val & GPU_IRQ_RESET_COMPLETED, 100, 10000);
++		val, val & GPU_IRQ_RESET_COMPLETED, 5, 10000);
+ 
+ 	if (ret) {
+ 		dev_err(pfdev->dev, "gpu soft reset timed out\n");
+@@ -318,35 +318,46 @@ static void panfrost_gpu_init_features(struct panfrost_device *pfdev)
+ void panfrost_gpu_power_on(struct panfrost_device *pfdev)
+ {
+ 	int ret;
+-	u32 val;
++	ktime_t timeout;
+ 
+ 	panfrost_gpu_init_quirks(pfdev);
+ 
+ 	/* Just turn on everything for now */
+ 	gpu_write(pfdev, L2_PWRON_LO, pfdev->features.l2_present);
+-	ret = readl_relaxed_poll_timeout(pfdev->iomem + L2_READY_LO,
+-		val, val == pfdev->features.l2_present, 100, 20000);
+-	if (ret)
+-		dev_err(pfdev->dev, "error powering up gpu L2");
+-
++	//gpu_write(pfdev, STACK_PWRON_LO, pfdev->features.stack_present);
+ 	gpu_write(pfdev, SHADER_PWRON_LO, pfdev->features.shader_present);
+-	ret = readl_relaxed_poll_timeout(pfdev->iomem + SHADER_READY_LO,
+-		val, val == pfdev->features.shader_present, 100, 20000);
+-	if (ret)
+-		dev_err(pfdev->dev, "error powering up gpu shader");
+-
+ 	gpu_write(pfdev, TILER_PWRON_LO, pfdev->features.tiler_present);
+-	ret = readl_relaxed_poll_timeout(pfdev->iomem + TILER_READY_LO,
+-		val, val == pfdev->features.tiler_present, 100, 1000);
++
++	timeout = ktime_add_us(ktime_get(), 1000);
++	ret = 0;
++	for (;;) {
++	if (gpu_read(pfdev, L2_READY_LO) ==
++			pfdev->features.l2_present &&
++			/*gpu_read(pfdev, STACK_READY_LO) ==
++			pfdev->features.stack_present &&*/
++		    gpu_read(pfdev, SHADER_READY_LO) ==
++			pfdev->features.shader_present &&
++		    gpu_read(pfdev, TILER_READY_LO) ==
++			pfdev->features.tiler_present)
++			break;
++		if (ktime_compare(ktime_get(), timeout) > 0) {
++			ret = 1;
++			break;
++		}
++		usleep_range(3, 5);
++	}
++
+ 	if (ret)
+ 		dev_err(pfdev->dev, "error powering up gpu tiler");
+ }
+ 
+ void panfrost_gpu_power_off(struct panfrost_device *pfdev)
+ {
+-	gpu_write(pfdev, TILER_PWROFF_LO, 0);
+-	gpu_write(pfdev, SHADER_PWROFF_LO, 0);
+-	gpu_write(pfdev, L2_PWROFF_LO, 0);
++	dev_dbg(pfdev->dev, "gpu_power_off...\n");
++	gpu_write(pfdev, TILER_PWROFF_LO, pfdev->features.tiler_present);
++	gpu_write(pfdev, SHADER_PWROFF_LO, pfdev->features.shader_present);
++	//gpu_write(pfdev, STACK_PWROFF_LO, pfdev->features.stack_present);
++	gpu_write(pfdev, L2_PWROFF_LO, pfdev->features.l2_present);
+ }
+ 
+ int panfrost_gpu_init(struct panfrost_device *pfdev)
+diff --git a/drivers/gpu/drm/panfrost/panfrost_job.c b/drivers/gpu/drm/panfrost/panfrost_job.c
+index 682f2161b999..1e4dd64ec8d8 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_job.c
++++ b/drivers/gpu/drm/panfrost/panfrost_job.c
+@@ -143,6 +143,8 @@ static void panfrost_job_write_affinity(struct panfrost_device *pfdev,
+ 	 * multiple (2) coherent core groups
+ 	 */
+ 	affinity = pfdev->features.shader_present;
++	if (panfrost_model_eq(pfdev, 0x620) && js == 1)
++		affinity &= 0xf;
+ 
+ 	job_write(pfdev, JS_AFFINITY_NEXT_LO(js), affinity & 0xFFFFFFFF);
+ 	job_write(pfdev, JS_AFFINITY_NEXT_HI(js), affinity >> 32);
+@@ -190,7 +192,7 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
+ 		job_write(pfdev, JS_FLUSH_ID_NEXT(js), job->flush_id);
+ 
+ 	/* GO ! */
+-	dev_dbg(pfdev->dev, "JS: Submitting atom %p to js[%d] with head=0x%llx",
++	dev_dbg(pfdev->dev, "JS: Submitting atom %px to js[%d] with head=0x%llx",
+ 				job, js, jc_head);
+ 
+ 	job_write(pfdev, JS_COMMAND_NEXT(js), JS_COMMAND_START);
+@@ -446,7 +448,7 @@ static enum drm_gpu_sched_stat panfrost_job_timedout(struct drm_sched_job
+ 	if (dma_fence_is_signaled(job->done_fence))
+ 		return DRM_GPU_SCHED_STAT_NOMINAL;
+ 
+-	dev_err(pfdev->dev, "gpu sched timeout, js=%d, config=0x%x, status=0x%x, head=0x%x, tail=0x%x, sched_job=%p",
++	dev_err(pfdev->dev, "gpu sched timeout, js=%d, config=0x%x, status=0x%x, head=0x%x, tail=0x%x, sched_job=%px",
+ 		js,
+ 		job_read(pfdev, JS_CONFIG(js)),
+ 		job_read(pfdev, JS_STATUS(js)),
+diff --git a/drivers/gpu/drm/panfrost/panfrost_mmu.c b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+index eea6ade902cb..d71d8d4cb4ac 100644
+--- a/drivers/gpu/drm/panfrost/panfrost_mmu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+@@ -34,7 +34,7 @@ static int wait_ready(struct panfrost_device *pfdev, u32 as_nr)
+ 	/* Wait for the MMU status to indicate there is no active command, in
+ 	 * case one is pending. */
+ 	ret = readl_relaxed_poll_timeout_atomic(pfdev->iomem + AS_STATUS(as_nr),
+-		val, !(val & AS_STATUS_AS_ACTIVE), 10, 1000);
++		val, !(val & AS_STATUS_AS_ACTIVE), 3, 1000);
+ 
+ 	if (ret)
+ 		dev_err(pfdev->dev, "AS_ACTIVE bit stuck\n");
+@@ -60,11 +60,38 @@ static void lock_region(struct panfrost_device *pfdev, u32 as_nr,
+ 	u8 region_width;
+ 	u64 region = iova & PAGE_MASK;
+ 
++	/* TODO: Needs to merge it later */
++#if 0 /* from Linux mainline */
+ 	/* The size is encoded as ceil(log2) minus(1), which may be calculated
+ 	 * with fls. The size must be clamped to hardware bounds.
+ 	 */
+ 	size = max_t(u64, size, AS_LOCK_REGION_MIN_SIZE);
+ 	region_width = fls64(size - 1) - 1;
++#else /* from Baikal-M Panfrost patch */
++	/*
++	 * fls returns:
++	 * 1 .. 32
++	 *
++	 * 10 + fls(num_pages)
++	 * results in the range (11 .. 42)
++	 */
++
++	if (size & ~PAGE_MASK)
++		size = (size >> PAGE_SHIFT) + 1;
++	else
++		size = size >> PAGE_SHIFT;
++	region_width = 10;
++	if (size > 0x80000000) {
++		if (size & 0xffffffff)
++			size = (size >> 32) + 1;
++		else
++			size = size >> 32;
++		region_width += 32;
++	}
++	region_width += fls(size);
++	if (size != (1ul << ((region_width - 11) & 0x1f)))
++		region_width++;
++#endif
+ 	region |= region_width;
+ 
+ 	/* Lock the region that needs to be updated */
+@@ -109,7 +136,12 @@ static void panfrost_mmu_enable(struct panfrost_device *pfdev, struct panfrost_m
+ 	u64 transtab = cfg->arm_mali_lpae_cfg.transtab;
+ 	u64 memattr = cfg->arm_mali_lpae_cfg.memattr;
+ 
++	/* TODO: Needs to merge it later */
++#if 0 /* from Linux mainline */
+ 	mmu_hw_do_operation_locked(pfdev, as_nr, 0, ~0ULL, AS_COMMAND_FLUSH_MEM);
++#else /* from Baikal-M Panfrost patch */
++	mmu_hw_do_operation_locked(pfdev, as_nr, 0, 1ULL << 48, AS_COMMAND_FLUSH_MEM);
++#endif
+ 
+ 	mmu_write(pfdev, AS_TRANSTAB_LO(as_nr), transtab & 0xffffffffUL);
+ 	mmu_write(pfdev, AS_TRANSTAB_HI(as_nr), transtab >> 32);
+@@ -117,6 +149,10 @@ static void panfrost_mmu_enable(struct panfrost_device *pfdev, struct panfrost_m
+ 	/* Need to revisit mem attrs.
+ 	 * NC is the default, Mali driver is inner WT.
+ 	 */
++	if (panfrost_model_eq(pfdev, 0x620)) {
++		memattr &= ~0xf0f0f0ULL;
++		memattr |= 0x404040;
++	}
+ 	mmu_write(pfdev, AS_MEMATTR_LO(as_nr), memattr & 0xffffffffUL);
+ 	mmu_write(pfdev, AS_MEMATTR_HI(as_nr), memattr >> 32);
+ 
+@@ -180,7 +216,7 @@ u32 panfrost_mmu_as_get(struct panfrost_device *pfdev, struct panfrost_mmu *mmu)
+ 	atomic_set(&mmu->as_count, 1);
+ 	list_add(&mmu->list, &pfdev->as_lru_list);
+ 
+-	dev_dbg(pfdev->dev, "Assigned AS%d to mmu %p, alloc_mask=%lx", as, mmu, pfdev->as_alloc_mask);
++	dev_dbg(pfdev->dev, "Assigned AS%d to mmu %px, alloc_mask=%lx", as, mmu, pfdev->as_alloc_mask);
+ 
+ 	panfrost_mmu_enable(pfdev, mmu);
+ 
+@@ -281,6 +317,8 @@ int panfrost_mmu_map(struct panfrost_gem_mapping *mapping)
+ 
+ 	if (bo->noexec)
+ 		prot |= IOMMU_NOEXEC;
++	if (bo->is_heap)
++		prot |= IOMMU_CACHE;
+ 
+ 	sgt = drm_gem_shmem_get_pages_sgt(obj);
+ 	if (WARN_ON(IS_ERR(sgt)))
+-- 
+2.33.0
+

@@ -1,0 +1,27 @@
+From a7ab53caa7c109d846798a3d81c8689f2db3fe53 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 17 Jun 2021 11:30:02 +0500
+Subject: [PATCH 049/106] dwc-i2s: Added deferred probe when no irq_num
+
+---
+ sound/soc/dwc/dwc-i2s.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/sound/soc/dwc/dwc-i2s.c b/sound/soc/dwc/dwc-i2s.c
+index 38e0eaacb40e..f5b543deed79 100644
+--- a/sound/soc/dwc/dwc-i2s.c
++++ b/sound/soc/dwc/dwc-i2s.c
+@@ -644,7 +644,9 @@ static int dw_i2s_probe(struct platform_device *pdev)
+ 	dev->dev = &pdev->dev;
+ 	irq_num = platform_irq_count(pdev);
+ 
+-	if (!irq_num)
++	if (irq_num < 0) /* -EPROBE_DEFER */
++		return irq_num;
++	else if (!irq_num)
+ 		dev_err(&pdev->dev, "No irq found on device\n");
+ 
+ 	do {
+-- 
+2.33.0
+

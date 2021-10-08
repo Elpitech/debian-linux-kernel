@@ -1,0 +1,22 @@
+From 60fef9314dd51c5b2e04119af7a60be0a0914af2 Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Mon, 13 Sep 2021 03:37:19 +0300
+Subject: [PATCH 086/106] adm/bmlk#4 Fix ci defconfig path for tf307 board
+
+---
+ .gitlab-ci.yml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 44f71b85b40a..9957621ea489 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -71,4 +71,4 @@ build-kernel-tf307-mb-s-d:
+   extends: .build-kernel
+   variables:
+     BOARD: tf307d
+-    DEFCONFIG: tp_baikalm_defconfig
++    DEFCONFIG: edelweiss_tf307_mb_d_defconfig
+-- 
+2.33.0
+

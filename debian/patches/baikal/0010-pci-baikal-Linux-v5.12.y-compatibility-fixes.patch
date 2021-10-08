@@ -1,0 +1,33 @@
+From e5ffce163d20b6da55cbd724e11e7776791c915e Mon Sep 17 00:00:00 2001
+From: Vitaliy Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Wed, 7 Apr 2021 10:24:52 +0500
+Subject: [PATCH 010/106] pci/baikal: Linux v5.12.y compatibility fixes
+
+---
+ drivers/pci/controller/dwc/pcie-baikal.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/drivers/pci/controller/dwc/pcie-baikal.c b/drivers/pci/controller/dwc/pcie-baikal.c
+index 15fe4ae1e854..774b4957e209 100644
+--- a/drivers/pci/controller/dwc/pcie-baikal.c
++++ b/drivers/pci/controller/dwc/pcie-baikal.c
+@@ -174,7 +174,7 @@ static int baikal_pcie_host_init(struct pcie_port *pp)
+ 	int i;
+ 
+ 	/* Deconfigure all ATU regions - god knows what has uefi set them to */
+-	for (i = 0; i < pci->num_viewport; i++) {
++	for (i = 0; i < pci->num_ob_windows; i++) {
+ 		dw_pcie_writel_dbi(pci, PCIE_ATU_VIEWPORT,
+ 				   PCIE_ATU_REGION_OUTBOUND | i);
+ 		dw_pcie_writel_dbi(pci, PCIE_ATU_CR2, 0);
+@@ -318,7 +318,6 @@ static int baikal_add_pcie_port(struct baikal_pcie *rc,
+ 		return ret;
+ 	}
+ 
+-	pp->root_bus_nr = -1;
+ 	pp->ops = &baikal_pcie_host_ops;
+ 
+ 	ret = dw_pcie_host_init(pp);
+-- 
+2.33.0
+

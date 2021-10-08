@@ -1,0 +1,38 @@
+From 8e5e02279675b8bf4ff6fc3e670eed69639d2876 Mon Sep 17 00:00:00 2001
+From: Roman Stavtsev <roman.stavtsev@baikalelectronics.ru>
+Date: Sat, 17 Apr 2021 21:45:29 +0300
+Subject: [PATCH 026/106] samples: add Build BPF sample code
+
+---
+ samples/Kconfig  | 7 +++++++
+ samples/Makefile | 1 +
+ 2 files changed, 8 insertions(+)
+
+diff --git a/samples/Kconfig b/samples/Kconfig
+index b5a1a7aa7e23..c15bd7aadce8 100644
+--- a/samples/Kconfig
++++ b/samples/Kconfig
+@@ -223,4 +223,11 @@ config SAMPLE_WATCH_QUEUE
+ 	  Build example userspace program to use the new mount_notify(),
+ 	  sb_notify() syscalls and the KEYCTL_WATCH_KEY keyctl() function.
+ 
++config SAMPLE_BPF
++	bool "Build BPF sample code"
++	depends on HEADERS_INSTALL
++	help
++	  Build samples of BPF filters using various methods of
++	  BPF filter construction.
++
+ endif # SAMPLES
+diff --git a/samples/Makefile b/samples/Makefile
+index 087e0988ccc5..b6f0419c566f 100644
+--- a/samples/Makefile
++++ b/samples/Makefile
+@@ -30,3 +30,4 @@ obj-$(CONFIG_SAMPLE_INTEL_MEI)		+= mei/
+ subdir-$(CONFIG_SAMPLE_WATCHDOG)	+= watchdog
+ subdir-$(CONFIG_SAMPLE_WATCH_QUEUE)	+= watch_queue
+ obj-$(CONFIG_DEBUG_KMEMLEAK_TEST)	+= kmemleak/
++subdir-$(CONFIG_SAMPLE_BPF)             += bpf
+-- 
+2.33.0
+

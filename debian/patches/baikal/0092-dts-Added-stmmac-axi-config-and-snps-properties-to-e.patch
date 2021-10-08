@@ -1,0 +1,64 @@
+From 2db04b1b36118d3fbd28c2f57f853cf9a8334a43 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitaliy.miniakhmetov@elpitech.ru>
+Date: Fri, 1 Oct 2021 12:15:46 +0500
+Subject: [PATCH 092/106] dts: Added stmmac-axi-config and snps properties to
+ eth0 and eth1
+
+---
+ arch/arm64/boot/dts/baikal/bm-soc.dtsi | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-soc.dtsi b/arch/arm64/boot/dts/baikal/bm-soc.dtsi
+index 4323127d4cd9..bac3b6cb9227 100644
+--- a/arch/arm64/boot/dts/baikal/bm-soc.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-soc.dtsi
+@@ -824,6 +824,12 @@ its: its@2d020000 {
+ 			};
+ 		};
+ 
++		axi_gmac: stmmac-axi-config0 {
++			snps,wr_osr_lmt = <0x0>;
++			snps,rd_osr_lmt = <0x0>;
++			snps,blen = <0 0 0 0 0 0 4>;
++		};
++
+ 		/* XGBE MM: GMAC0 (30240000, 10000, SPI_323_H) */
+ 		gmac0: eth0@30240000 {
+ 			compatible = "be,dwmac", "snps,dwmac-3.710", "snps,dwmac";
+@@ -834,11 +840,15 @@ gmac0: eth0@30240000 {
+ 			max-speed = <1000>;
+ 			clocks = <&soc_ethclk>, <&cmu0_xgbe 10>;
+ 			clock-names = "stmmaceth", "tx2_clk";
+-			snps,fixed-burst;
+ 			mac-address = [ 00 00 00 00 00 00 ];
+ 			local-mac-address = [ 00 00 00 00 00 00 ];
+ 			phy-mode = "rgmii-id";
+ 			phy-handle = <&gmac0_phy>;
++			snps,fixed-burst;
++			snps,axi-config = <&axi_gmac>;
++			snps,no-pbl-x8;
++			snps,txpbl = <4>;
++			snps,rxpbl = <4>;
+ 			snps,reset-delays-us = <0 10200 1000>;
+ 			status = "disabled";
+ 			dma-coherent;
+@@ -870,11 +880,15 @@ gmac1: eth1@30250000 {
+ 			max-speed = <1000>;
+ 			clocks = <&soc_ethclk>, <&cmu0_xgbe 13>;
+ 			clock-names = "stmmaceth", "tx2_clk";
+-			snps,fixed-burst;
+ 			mac-address = [ 00 00 00 00 00 00 ];
+ 			local-mac-address = [ 00 00 00 00 00 00 ];
+ 			phy-mode = "rgmii-id";
+ 			phy-handle = <&gmac1_phy>;
++			snps,fixed-burst;
++			snps,axi-config = <&axi_gmac>;
++			snps,no-pbl-x8;
++			snps,txpbl = <4>;
++			snps,rxpbl = <4>;
+ 			snps,reset-delays-us = <0 10200 1000>;
+ 			status = "disabled";
+ 			dma-coherent;
+-- 
+2.33.0
+

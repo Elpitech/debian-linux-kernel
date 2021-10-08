@@ -1,0 +1,35 @@
+From ae9754ce1d431df670035d18176cf4320ed786ae Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 17 Jun 2021 12:28:03 +0500
+Subject: [PATCH 054/106] i2c-baikal-smbus: Using
+ devm_platform_ioremap_resource() to get iomem base
+
+---
+ drivers/i2c/busses/i2c-baikal-smbus.c | 4 +---
+ 1 file changed, 1 insertion(+), 3 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-baikal-smbus.c b/drivers/i2c/busses/i2c-baikal-smbus.c
+index e8d608830084..a1ff5ed9cb12 100644
+--- a/drivers/i2c/busses/i2c-baikal-smbus.c
++++ b/drivers/i2c/busses/i2c-baikal-smbus.c
+@@ -363,7 +363,6 @@ static irqreturn_t be_smbus_isr(int irq, void *_dev)
+ static int be_smbus_probe(struct platform_device *pdev)
+ {
+ 	struct be_smbus_dev *besmb;
+-	struct resource *res;
+ 	void __iomem *base;
+ 	int irq;
+ 	int ret;
+@@ -373,8 +372,7 @@ static int be_smbus_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 	}
+ 
+-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	base = devm_ioremap_resource(&pdev->dev, res);
++	base = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(base)) {
+ 		return PTR_ERR(base);
+ 	}
+-- 
+2.33.0
+

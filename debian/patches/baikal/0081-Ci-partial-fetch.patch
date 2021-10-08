@@ -1,0 +1,23 @@
+From 6e6133f7b5650a15e977c253e88ec7119be9fc3c Mon Sep 17 00:00:00 2001
+From: "Kirik,  Konstantin" <konstantin.kirik@t-platforms.ru>
+Date: Mon, 5 Jul 2021 07:02:19 +0000
+Subject: [PATCH 081/106] Ci partial fetch
+
+---
+ .gitlab-ci.yml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 3faa350ef45a..105346dfb1a8 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -1,5 +1,6 @@
+ variables:
+   GIT_DEPTH: 200
++  GIT_STRATEGY: clone
+ 
+ .build-kernel:
+   stage: build
+-- 
+2.33.0
+

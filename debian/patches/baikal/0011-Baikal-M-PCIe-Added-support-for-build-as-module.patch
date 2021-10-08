@@ -1,0 +1,63 @@
+From 57eea8ea81c3e78941e2892eda303778b3b65c8a Mon Sep 17 00:00:00 2001
+From: Miniakhmetov Vitaly <vitalii.miniakhmetov@t-platforms.ru>
+Date: Thu, 20 May 2021 13:19:08 +0500
+Subject: [PATCH 011/106] Baikal-M/PCIe: Added support for build as module
+
+---
+ drivers/pci/controller/dwc/Kconfig       | 3 +--
+ drivers/pci/controller/dwc/pcie-baikal.c | 6 ++++++
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/pci/controller/dwc/Kconfig b/drivers/pci/controller/dwc/Kconfig
+index 3b79a78fbb79..16dda4a804a4 100644
+--- a/drivers/pci/controller/dwc/Kconfig
++++ b/drivers/pci/controller/dwc/Kconfig
+@@ -83,11 +83,10 @@ config PCIE_DW_PLAT_EP
+ 	  selected.
+ 
+ config PCIE_BAIKAL
+-	bool "Baikal SoC PCIe controller"
++	tristate "Baikal SoC PCIe controller"
+ 	depends on ARCH_BAIKAL
+ 	depends on OF && HAS_IOMEM
+ 	depends on PCI_MSI_IRQ_DOMAIN
+-	select PCIE_DW
+ 	select PCIE_DW_HOST
+ 	help
+ 	  Enables support for the PCIe controller in the Baikal SoC.  There
+diff --git a/drivers/pci/controller/dwc/pcie-baikal.c b/drivers/pci/controller/dwc/pcie-baikal.c
+index 774b4957e209..dc597718b203 100644
+--- a/drivers/pci/controller/dwc/pcie-baikal.c
++++ b/drivers/pci/controller/dwc/pcie-baikal.c
+@@ -6,11 +6,13 @@
+  * Author: Pavel Parkhomenko <Pavel.Parkhomenko@baikalelectronics.ru>
+  */
+ 
++#include <linux/module.h>
+ #include <linux/interrupt.h>
+ #include <linux/irqchip/arm-gic-v3.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/mfd/baikal/lcru-pcie.h>
+ #include <linux/of_address.h>
++#include <linux/of_device.h>
+ #include <linux/of_gpio.h>
+ #include <linux/pci.h>
+ #include <linux/phy/phy.h>
+@@ -377,6 +379,7 @@ static const struct of_device_id of_baikal_pcie_match[] = {
+ 	{ .compatible = "baikal,pcie-m", },
+ 	{},
+ };
++MODULE_DEVICE_TABLE(of, of_baikal_pcie_match);
+ 
+ static int baikal_pcie_probe(struct platform_device *pdev)
+ {
+@@ -544,3 +547,6 @@ static struct platform_driver baikal_pcie_driver = {
+ };
+ 
+ builtin_platform_driver(baikal_pcie_driver);
++
++MODULE_DESCRIPTION("Baikal PCIe host controller driver");
++MODULE_LICENSE("GPL v2");
+-- 
+2.33.0
+

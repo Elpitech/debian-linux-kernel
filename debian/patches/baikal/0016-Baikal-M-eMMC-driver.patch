@@ -1,0 +1,132 @@
+From 8314118153459f600d47553be08cc815a1322449 Mon Sep 17 00:00:00 2001
+From: Roman Stavtsev <roman.stavtsev@baikalelectronics.ru>
+Date: Sat, 17 Apr 2021 15:49:35 +0300
+Subject: [PATCH 016/106] Baikal-M: eMMC driver
+
+---
+ drivers/mmc/host/sdhci-of-dwcmshc.c | 17 +++++++++++++----
+ drivers/mmc/host/sdhci.c            |  3 ++-
+ drivers/mmc/host/sdhci.h            |  9 +++++++++
+ 3 files changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-of-dwcmshc.c b/drivers/mmc/host/sdhci-of-dwcmshc.c
+index bac874ab0b33..6e37ec750f3b 100644
+--- a/drivers/mmc/host/sdhci-of-dwcmshc.c
++++ b/drivers/mmc/host/sdhci-of-dwcmshc.c
+@@ -60,6 +60,8 @@
+ #define BOUNDARY_OK(addr, len) \
+ 	((addr | (SZ_128M - 1)) == ((addr + len - 1) | (SZ_128M - 1)))
+ 
++#define MSHC_INPUT_DIVIDER 2  /* mshc_tx_x2 to mshc_tx divider */
++
+ struct rk3568_priv {
+ 	/* Rockchip specified optional clocks */
+ 	struct clk_bulk_data rockchip_clks[RK3568_MAX_CLKS];
+@@ -100,7 +102,7 @@ static unsigned int dwcmshc_get_max_clock(struct sdhci_host *host)
+ 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+ 
+ 	if (pltfm_host->clk)
+-		return sdhci_pltfm_clk_get_max_clock(host);
++		return sdhci_pltfm_clk_get_max_clock(host) / MSHC_INPUT_DIVIDER;
+ 	else
+ 		return pltfm_host->clock;
+ }
+@@ -276,7 +278,7 @@ static const struct sdhci_ops sdhci_dwcmshc_rk3568_ops = {
+ static const struct sdhci_pltfm_data sdhci_dwcmshc_pdata = {
+ 	.ops = &sdhci_dwcmshc_ops,
+ 	.quirks = SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN,
+-	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
++	.quirks2 = SDHCI_QUIRK2_PRESET_VALUE_BROKEN | SDHCI_QUIRK2_BROKEN_64_BIT_DMA_MASK,
+ };
+ 
+ static const struct sdhci_pltfm_data sdhci_dwcmshc_rk3568_pdata = {
+@@ -351,6 +353,7 @@ static int dwcmshc_probe(struct platform_device *pdev)
+ 	const struct sdhci_pltfm_data *pltfm_data;
+ 	int err;
+ 	u32 extra;
++	u32 max;
+ 
+ 	pltfm_data = of_device_get_match_data(&pdev->dev);
+ 	if (!pltfm_data) {
+@@ -390,6 +393,14 @@ static int dwcmshc_probe(struct platform_device *pdev)
+ 			clk_prepare_enable(priv->bus_clk);
+ 	}
+ 
++	if (device_property_read_u32(&pdev->dev, "max-frequency", &max) < 0)
++		max = 10000000;
++	clk_set_rate(pltfm_host->clk, max * MSHC_INPUT_DIVIDER);
++
++	err = clk_prepare_enable(pltfm_host->clk);
++	if (err)
++		goto free_pltfm;
++
+ 	err = mmc_of_parse(host->mmc);
+ 	if (err)
+ 		goto err_clk;
+@@ -468,8 +479,6 @@ static int dwcmshc_suspend(struct device *dev)
+ 		return ret;
+ 
+ 	clk_disable_unprepare(pltfm_host->clk);
+-	if (!IS_ERR(priv->bus_clk))
+-		clk_disable_unprepare(priv->bus_clk);
+ 
+ 	if (rk_priv)
+ 		clk_bulk_disable_unprepare(RK3568_MAX_CLKS,
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index a1df6d4e9e86..713833d9a7c9 100644
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -3956,7 +3956,8 @@ static int sdhci_set_dma_mask(struct sdhci_host *host)
+ 		host->flags &= ~SDHCI_USE_64_BIT_DMA;
+ 
+ 	/* Try 64-bit mask if hardware is capable  of it */
+-	if (host->flags & SDHCI_USE_64_BIT_DMA) {
++	if (!(host->quirks2 & SDHCI_QUIRK2_BROKEN_64_BIT_DMA_MASK) &&
++	     (host->flags & SDHCI_USE_64_BIT_DMA)) {
+ 		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+ 		if (ret) {
+ 			pr_warn("%s: Failed to set 64-bit DMA mask.\n",
+diff --git a/drivers/mmc/host/sdhci.h b/drivers/mmc/host/sdhci.h
+index 960fed78529e..232d21db288d 100644
+--- a/drivers/mmc/host/sdhci.h
++++ b/drivers/mmc/host/sdhci.h
+@@ -222,6 +222,7 @@
+ #define  SDHCI_SUPPORT_SDR50	0x00000001
+ #define  SDHCI_SUPPORT_SDR104	0x00000002
+ #define  SDHCI_SUPPORT_DDR50	0x00000004
++#define  SDHCI_SUPPORT_UHS2	0x00000008
+ #define  SDHCI_DRIVER_TYPE_A	0x00000010
+ #define  SDHCI_DRIVER_TYPE_C	0x00000020
+ #define  SDHCI_DRIVER_TYPE_D	0x00000040
+@@ -230,6 +231,7 @@
+ #define  SDHCI_RETUNING_MODE_MASK		GENMASK(15, 14)
+ #define  SDHCI_CLOCK_MUL_MASK			GENMASK(23, 16)
+ #define  SDHCI_CAN_DO_ADMA3	0x08000000
++#define  SDHCI_SUPPORT_VDD2_18	0x10000000
+ #define  SDHCI_SUPPORT_HS400	0x80000000 /* Non-standard */
+ 
+ #define SDHCI_MAX_CURRENT		0x48
+@@ -278,6 +280,12 @@
+ #define   SDHCI_SPEC_410	4
+ #define   SDHCI_SPEC_420	5
+ 
++
++#define SDHCI_EMMC_CONTROL	0x52C
++#define  SDHCI_EMMC_TYPE_MMC	(1 << 0)  /* 0-sd,     1-mmc     */
++#define  SDHCI_EMMC_CRC_DISABLE	(1 << 1)  /* 0-enable, 1-disable */
++#define  SDHCI_EMMC_DONT_RESET	(1 << 2)  /* 0-reset,  1-dont    */
++
+ /*
+  * End of controller registers.
+  */
+@@ -474,6 +482,7 @@ struct sdhci_host {
+  * block count.
+  */
+ #define SDHCI_QUIRK2_USE_32BIT_BLK_CNT			(1<<18)
++#define SDHCI_QUIRK2_BROKEN_64_BIT_DMA_MASK		(1<<19)
+ 
+ 	int irq;		/* Device IRQ */
+ 	void __iomem *ioaddr;	/* Mapped address */
+-- 
+2.33.0
+

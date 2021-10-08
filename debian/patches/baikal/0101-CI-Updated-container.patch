@@ -1,0 +1,25 @@
+From d5ed3375ceb36fba623d73a5253fd388c264a0f4 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitaliy.miniakhmetov@elpitech.ru>
+Date: Thu, 7 Oct 2021 14:54:55 +0500
+Subject: [PATCH 101/106] CI: Updated container
+
+---
+ .gitlab-ci.yml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index 2af0cdef9e90..58135c00c0e7 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -3,7 +3,7 @@ variables:
+ 
+ .build-kernel:
+   stage: build
+-  image: $CI_REGISTRY/containers/common-kernel-builder:0-0-3
++  image: $CI_REGISTRY/containers/common-kernel-builder:0-0-4
+   variables:
+     DEFCONFIG: defconfig
+     BOARD: bm
+-- 
+2.33.0
+

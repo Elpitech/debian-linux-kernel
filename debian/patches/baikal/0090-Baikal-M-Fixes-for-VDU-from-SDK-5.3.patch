@@ -1,0 +1,78 @@
+From e844d103eab1394d683b47795f2df6744cbd7987 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitaliy.miniakhmetov@elpitech.ru>
+Date: Fri, 1 Oct 2021 01:58:51 +0500
+Subject: [PATCH 090/106] Baikal-M: Fixes for VDU from SDK 5.3
+
+---
+ drivers/gpu/drm/baikal/baikal_vdu_crtc.c | 22 +++++++++++++++++-----
+ drivers/gpu/drm/baikal/baikal_vdu_regs.h |  3 +++
+ 2 files changed, 20 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+index d2b255c3dcc2..6e6486b86352 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
++++ b/drivers/gpu/drm/baikal/baikal_vdu_crtc.c
+@@ -76,6 +76,21 @@ irqreturn_t baikal_vdu_irq(int irq, void *data)
+ 		status = IRQ_HANDLED;
+ 	}
+ 
++	if (raw_stat & INTR_UFU) {
++		priv->counters[4]++;
++		status = IRQ_HANDLED;
++	}
++
++	if (raw_stat & INTR_IFO) {
++		priv->counters[5]++;
++		status = IRQ_HANDLED;
++	}
++
++	if (raw_stat & INTR_OFU) {
++		priv->counters[6]++;
++		status = IRQ_HANDLED;
++	}
++
+ 	if (irq_stat & INTR_FER) {
+ 		priv->counters[11]++;
+ 		priv->counters[12] = readl(priv->regs + DBAR);
+@@ -87,7 +102,7 @@ irqreturn_t baikal_vdu_irq(int irq, void *data)
+ 	priv->counters[3] |= raw_stat;
+ 
+ 	/* Clear all interrupts */
+-	writel(irq_stat, priv->regs + ISR);
++	writel(raw_stat, priv->regs + ISR);
+ 
+ 	return status;
+ }
+@@ -217,10 +232,7 @@ static void baikal_vdu_crtc_helper_mode_set_nofb(struct drm_crtc *crtc)
+ 		reg |= CR1_HSP;
+ 	else
+ 		reg &= ~CR1_HSP;
+-	if (mode->flags & DRM_MODE_FLAG_NVSYNC)
+-		reg |= CR1_VSP;
+-	else
+-		reg &= ~CR1_VSP;
++	reg &= ~CR1_VSP; // always set VSP to active high
+ 	reg |= CR1_DEP; // set DE to active high;
+ 	writel(reg, priv->regs + CR1);
+ 
+diff --git a/drivers/gpu/drm/baikal/baikal_vdu_regs.h b/drivers/gpu/drm/baikal/baikal_vdu_regs.h
+index c28dbf0904de..45be447c0887 100644
+--- a/drivers/gpu/drm/baikal/baikal_vdu_regs.h
++++ b/drivers/gpu/drm/baikal/baikal_vdu_regs.h
+@@ -43,10 +43,13 @@
+ #define OWDEAR1     0x628
+ #define MRR         0xFFC
+ 
++#define INTR_UFU    BIT(16)
+ #define INTR_BAU    BIT(7)
+ #define INTR_VCT    BIT(6)
+ #define INTR_MBE    BIT(5)
+ #define INTR_FER    BIT(4)
++#define INTR_IFO    BIT(3)
++#define INTR_OFU    BIT(0)
+ 
+ #define CR1_FBP             BIT(19)
+ #define CR1_FDW_MASK        GENMASK(17, 16)
+-- 
+2.33.0
+

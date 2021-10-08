@@ -1,0 +1,59 @@
+From 50794a893cdb2c9463013208db98e58ad298ca86 Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitaliy.miniakhmetov@elpitech.ru>
+Date: Thu, 7 Oct 2021 17:37:13 +0500
+Subject: [PATCH 102/106] dts: Enable HDA only for et101-bm-a1/a2
+
+---
+ arch/arm64/boot/dts/baikal/bm-mbm.dtsi              | 4 ----
+ arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts | 4 ++++
+ arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts | 4 ++++
+ 3 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+index 377333179f54..52512e069f0d 100644
+--- a/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-mbm.dtsi
+@@ -64,10 +64,6 @@ &gpu {
+ 	system-coherency = <0>;
+ };
+ 
+-&hda {
+-	status = "okay";
+-};
+-
+ &hdmi {
+ 	status = "okay";
+ };
+diff --git a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts
+index a1aed946bdd3..0e1e5e5f1df6 100644
+--- a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts
++++ b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts
+@@ -16,6 +16,10 @@ sound {
+ 	};
+ };
+ 
++&hda {
++        status = "okay";
++};
++
+ &gmac0 {
+ 	status = "okay";
+ 	snps,reset-gpios = <&porta 19 GPIO_ACTIVE_LOW>;
+diff --git a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
+index 29d7db1e96df..06a1916e15aa 100644
+--- a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
++++ b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
+@@ -17,6 +17,10 @@ sound {
+ 	};
+ };
+ 
++&hda {
++        status = "okay";
++};
++
+ &gmac0 {
+ 	status = "okay";
+ 	snps,reset-gpios = <&porta 19 GPIO_ACTIVE_LOW>;
+-- 
+2.33.0
+

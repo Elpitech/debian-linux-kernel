@@ -1,0 +1,97 @@
+From 02558a5fbae5420ae9f85b40b595e5c6e74c240e Mon Sep 17 00:00:00 2001
+From: Vitaly Miniakhmetov <vitaliy.miniakhmetov@elpitech.ru>
+Date: Fri, 1 Oct 2021 11:56:17 +0500
+Subject: [PATCH 091/106] dts: Fix for vduX/hdmi clocks
+
+---
+ arch/arm64/boot/dts/baikal/bm-clocks.dtsi | 22 ----------------------
+ arch/arm64/boot/dts/baikal/bm-soc.dtsi    | 12 ++++++------
+ 2 files changed, 6 insertions(+), 28 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/bm-clocks.dtsi b/arch/arm64/boot/dts/baikal/bm-clocks.dtsi
+index 0b9c159e5bfc..6386934f58f5 100644
+--- a/arch/arm64/boot/dts/baikal/bm-clocks.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-clocks.dtsi
+@@ -159,13 +159,6 @@ cmu1_xgbe: cmu1_xgbe {
+ 	};
+ 
+ 	clocks {
+-		ref_clk: ref_clk {
+-			compatible = "fixed-clock";
+-			#clock-cells = <0>;
+-			clock-frequency = <25000000>;
+-			clock-output-names = "refclk";
+-		};
+-
+ 		cpu_clk: cpu_clk {
+ 			compatible = "fixed-clock";
+ 			#clock-cells = <0>;
+@@ -351,21 +344,6 @@ avlsp_cmu1: cmu1@avlsp {
+ 			clock-output-names = "baikal-cmu";
+ 		};
+ 
+-		xgbe_cmu0: cmu0@xgbe {
+-			compatible = "fixed-clock";
+-			#clock-cells = <1>;
+-			clock-indices = <0>, <10>, <13>, <15>, <17>;
+-			clock-output-names = "csr50_clk", "gmac0_tx2", "gmac1_tx2", "vdu_aclk", "hdmi_sfr_clk";
+-			clock-frequency = <50000000>, <250000000>, <250000000>, <416666667>, <25000000>;
+-		};
+-
+-		xgbe_cmu1: cmu1@xgbe {
+-			compatible = "fixed-clock";
+-			#clock-cells = <0>;
+-			clock-frequency = <600000000>;
+-			clock-output-names = "baikal-cmu";
+-		};
+-
+ 		usb_clk: usb_clk@1F04D074 {
+ 			#clock-cells = <0>;
+ 			compatible = "fixed-clock";
+diff --git a/arch/arm64/boot/dts/baikal/bm-soc.dtsi b/arch/arm64/boot/dts/baikal/bm-soc.dtsi
+index c9cabd5999d7..4323127d4cd9 100644
+--- a/arch/arm64/boot/dts/baikal/bm-soc.dtsi
++++ b/arch/arm64/boot/dts/baikal/bm-soc.dtsi
+@@ -662,8 +662,8 @@ vdu0: vdu_lvds@202D0000 {
+ 			reg = <0x0 0x202D0000 0x0 0x1000>;
+ 			interrupts = <GIC_SPI 112 IRQ_TYPE_LEVEL_HIGH>, /* VDU INTR */
+ 				     <GIC_SPI 113 IRQ_TYPE_LEVEL_HIGH>; /* VDU INTR_CDD */
+-			clocks = <&cmu1_avlsp_div7>, <&cmu0_avlsp 26>;
+-			clock-names = "pclk", "aclk";
++			clocks = <&cmu1_avlsp_div7>;
++			clock-names = "pclk";
+ 			lvds-out;
+ 			status = "disabled";
+ 		};
+@@ -995,7 +995,7 @@ xgmac1: eth3@30220000 {
+ 			amd,per-channel-interrupt;
+ 			amd,speed-set = <0>;
+ 			#stream-id-cells = <16>;
+-		 };
++		};
+ 
+ 		/* HDMI VDU (30260000, 10000, SPI_361-362_?) */
+ 		vdu1: vdu_hdmi@30260000 {
+@@ -1003,8 +1003,8 @@ vdu1: vdu_hdmi@30260000 {
+ 			reg = <0x0 0x30260000 0x0 0x1000>;
+ 			interrupts = <GIC_SPI 329 IRQ_TYPE_LEVEL_HIGH>, /* VDU INTR */
+ 				     <GIC_SPI 330 IRQ_TYPE_LEVEL_HIGH>; /* VDU INTR_CDD */
+-			clocks = <&cmu1_xgbe 0>, <&ref_clk>;
+-			clock-names = "pclk", "aclk";
++			clocks = <&cmu1_xgbe 0>;
++			clock-names = "pclk";
+ 			status = "disabled";
+ 
+ 			port {
+@@ -1019,7 +1019,7 @@ hdmi: hdmi@30280000 {
+ 			reg = <0 0x30280000 0 0x20000>;
+ 			reg-io-width = <4>;
+ 			interrupts = <GIC_SPI 331 IRQ_TYPE_LEVEL_HIGH>;
+-			clocks = <&xgbe_cmu0 0>, <&xgbe_cmu0 17>;
++			clocks = <&cmu0_xgbe 0>, <&cmu0_xgbe 17>;
+ 			clock-names = "iahb", "isfr";
+ 			status = "disabled";
+ 
+-- 
+2.33.0
+
