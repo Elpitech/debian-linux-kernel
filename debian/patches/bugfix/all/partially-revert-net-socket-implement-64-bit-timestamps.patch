@@ -117,7 +117,7 @@ diff --git a/net/socket.c b/net/socket.c
 index 976426d03f09..976b4c31c0ea 100644
 --- a/net/socket.c
 +++ b/net/socket.c
-@@ -1175,14 +1175,14 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
+@@ -1144,14 +1144,14 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
  
  			err = open_related_ns(&net->ns, get_net_ns);
  			break;
@@ -135,7 +135,7 @@ index 976426d03f09..976b4c31c0ea 100644
  						   !IS_ENABLED(CONFIG_64BIT));
  			break;
  		case SIOCGSTAMP_NEW:
-@@ -3404,11 +3404,11 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
+@@ -3260,11 +3260,11 @@ static int compat_sock_ioctl_trans(struct file *file, struct socket *sock,
  	case SIOCGIFMAP:
  	case SIOCSIFMAP:
  		return compat_sioc_ifmap(net, cmd, argp);
@@ -149,7 +149,7 @@ index 976426d03f09..976b4c31c0ea 100644
 +		return sock->ops->gettstamp(sock, argp, cmd == SIOCGSTAMP,
  					    !COMPAT_USE_64BIT_TIME);
  
- 	case SIOCBONDSLAVEINFOQUERY:
+	case SIOCETHTOOL:
 -- 
 2.27.0
 
