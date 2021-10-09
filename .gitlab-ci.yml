@@ -1,0 +1,57 @@
+variables:
+  GIT_STRATEGY: none
+
+.build-debian-kernel:
+  stage: build
+  image: $CI_REGISTRY/containers/common-debian-kernel-builder:0-0-1
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+    KERNEL_REF: v5.13.19
+    KERNEL_REPO: common/linux.git
+  tags:
+    - x86_64
+  before_script:
+    - if [ -d "${CI_PROJECT_DIR}" ]; then rm -rf "${CI_PROJECT_DIR}"; fi  # step 1: recreate project directory
+    - mkdir -p "${CI_PROJECT_DIR}"
+    - cd "${CI_PROJECT_DIR}"
+    - mkdir -p ~/.ssh # step 2 : set up ssh environment
+    - cat $deploy_id | base64 --decode > ~/.ssh/id_rsa
+    - echo "$deploy_id"
+    - echo "$CI_REGISTRY"
+    - ls -lah $deploy_id
+    - chmod 600 ~/.ssh/ -R
+    - eval "$(ssh-agent -s)"
+    - md5sum ~/.ssh/id_rsa
+    - ssh-add ~/.ssh/id_rsa
+    - ssh-keyscan -p $GITPORT -H "${CI_SERVER_HOST}" >> ~/.ssh/known_hosts
+    - mkdir linux && pushd linux
+    - git init # step 3 : fetch
+    - git remote add origin ssh://git@${CI_SERVER_HOST}:$GITPORT/${CI_PROJECT_PATH}.git
+    - git fetch origin "${CI_COMMIT_SHA}" --depth 1
+    - git reset --hard FETCH_HEAD
+    - popd
+    - mkdir orig_linux && pushd orig_linux
+    - git init # step 3 : fetch
+    - git remote add origin ssh://git@${CI_SERVER_HOST}:$GITPORT/${KERNEL_REPO}.git
+    - git fetch origin "${KERNEL_REF}" --depth 1
+    - git reset --hard FETCH_HEAD
+    - popd
+    - cd linux
+  script:
+    - |
+      debian/bin/genorig.py ../orig_linux
+      ARCH=arm64
+      FEATURESET=none
+      FLAVOUR=arm64
+      export $(dpkg-architecture -a$ARCH)
+      export PATH=/usr/lib/ccache:$PATH
+      export DEB_BUILD_PROFILES="cross nopython nodoc pkg.linux.notools pkg.linux.udeb-unsigned-test-build"
+      export MAKEFLAGS="-j$(($(nproc)*2))"
+      export DEBIAN_KERNEL_DISABLE_DEBUG=[ "$(dpkg-parsechangelog --show-field Distribution)" = "UNRELEASED" ] && export DEBIAN_KERNEL_DISABLE_DEBUG=yes
+      fakeroot make -f debian/rules orig
+      fakeroot make -f debian/rules source
+      fakeroot make -f debian/rules.gen setup_${ARCH}_${FEATURESET}_${FLAVOUR}
+      fakeroot make -f debian/rules.gen binary-arch_${ARCH}_${FEATURESET}_${FLAVOUR}
+
+stages:
+  - build
