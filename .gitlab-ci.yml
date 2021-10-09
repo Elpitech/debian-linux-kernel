@@ -1,7 +1,7 @@
 variables:
   GIT_STRATEGY: none
 
-.build-debian-kernel:
+build-debian-kernel:
   stage: build
   image: $CI_REGISTRY/containers/common-debian-kernel-builder:0-0-1
   variables:
