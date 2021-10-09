@@ -34,7 +34,7 @@ build-debian-kernel:
     - mkdir orig_linux && pushd orig_linux
     - git init # step 3 : fetch
     - git remote add origin ssh://git@${CI_SERVER_HOST}:$GITPORT/${KERNEL_REPO}.git
-    - git fetch origin "${KERNEL_REF}" --depth 1
+    - git fetch origin "${KERNEL_REF}"# maybe one day "--depth 1" can be set here, but not today
     - git reset --hard FETCH_HEAD
     - popd
     - cd linux
