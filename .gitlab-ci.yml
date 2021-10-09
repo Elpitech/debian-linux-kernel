@@ -6,6 +6,7 @@ build-debian-kernel:
   image: $CI_REGISTRY/containers/common-debian-kernel-builder:0-0-1
   variables:
     GIT_SUBMODULE_STRATEGY: recursive
+    GITPORT: 766
     KERNEL_REF: v5.13.19
     KERNEL_REPO: common/linux.git
   tags:
