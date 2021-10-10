@@ -41,7 +41,7 @@ build-debian-kernel:
     - cd linux
   script:
     - |
-      debian/bin/genorig.py ../orig_linux
+      debian/bin/genorig.py ../orig_linux || true
       ARCH=arm64
       FEATURESET=none
       FLAVOUR=arm64
