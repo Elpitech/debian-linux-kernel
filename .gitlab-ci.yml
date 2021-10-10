@@ -38,10 +38,11 @@ build-debian-kernel:
     - git reset --hard FETCH_HEAD
     - git fetch --tags
     - popd
+    - printf "#!/bin/bash\nset +e\necho \"Wrapper script\"\ndebian/bin/genorig.py ../orig_linux\nexit 0" > genorig_wrapper.sh
     - cd linux
   script:
     - |
-      debian/bin/genorig.py ../orig_linux || true
+      bash ../genorig_wrapper.sh
       ARCH=arm64
       FEATURESET=none
       FLAVOUR=arm64
