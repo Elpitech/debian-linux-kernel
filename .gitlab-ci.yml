@@ -9,6 +9,10 @@ build-debian-kernel:
     GITPORT: 766
     KERNEL_REF: v5.13.19
     KERNEL_REPO: common/linux
+    ARCH: arm64
+    FEATURESET: none
+    FLAVOUR: arm64
+
   tags:
     - x86_64
   before_script:
@@ -38,23 +42,19 @@ build-debian-kernel:
     - git reset --hard FETCH_HEAD
     - git fetch --tags
     - popd
-    - printf "#!/bin/bash\nset +e\necho \"Wrapper script\"\ndebian/bin/genorig.py ../orig_linux\nexit 0" > genorig_wrapper.sh
     - cd linux
   script:
-    - |
-      bash ../genorig_wrapper.sh
-      ARCH=arm64
-      FEATURESET=none
-      FLAVOUR=arm64
-      export $(dpkg-architecture -a$ARCH)
-      export PATH=/usr/lib/ccache:$PATH
-      export DEB_BUILD_PROFILES="cross nopython nodoc pkg.linux.notools pkg.linux.udeb-unsigned-test-build"
-      export MAKEFLAGS="-j$(($(nproc)*2))"
-      export DEBIAN_KERNEL_DISABLE_DEBUG=[ "$(dpkg-parsechangelog --show-field Distribution)" = "UNRELEASED" ] && export DEBIAN_KERNEL_DISABLE_DEBUG=yes
-      fakeroot make -f debian/rules orig
-      fakeroot make -f debian/rules source
-      fakeroot make -f debian/rules.gen setup_${ARCH}_${FEATURESET}_${FLAVOUR}
-      fakeroot make -f debian/rules.gen binary-arch_${ARCH}_${FEATURESET}_${FLAVOUR}
+    - debian/bin/genorig.py ../orig_linux
+    - export $(dpkg-architecture -a$ARCH)
+    - export PATH=/usr/lib/ccache:$PATH
+    - export DEB_BUILD_PROFILES="cross nopython nodoc pkg.linux.notools pkg.linux.udeb-unsigned-test-build"
+    - export MAKEFLAGS="-j$(($(nproc)*2))"
+    - export DEBIAN_KERNEL_DISABLE_DEBUG=$(test "$(dpkg-parsechangelog --show-field Distribution)" = "UNRELEASED" ) && export DEBIAN_KERNEL_DISABLE_DEBUG=yes
+    - fakeroot make -f debian/rules orig
+    - sed -i -e "s/exit 1//" debian/rules
+    - fakeroot make -f debian/rules source
+    - fakeroot make -f debian/rules.gen setup_${ARCH}_${FEATURESET}_${FLAVOUR}
+    - fakeroot make -f debian/rules.gen binary-arch_${ARCH}_${FEATURESET}_${FLAVOUR}
 
 stages:
   - build
