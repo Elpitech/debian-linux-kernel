@@ -36,6 +36,7 @@ build-debian-kernel:
     - git remote add origin ssh://git@${CI_SERVER_HOST}:$GITPORT/${KERNEL_REPO}.git
     - git fetch origin "${KERNEL_REF}"
     - git reset --hard FETCH_HEAD
+    - git fetch --tags
     - popd
     - cd linux
   script:
