@@ -3,7 +3,7 @@ variables:
 
 build-debian-kernel:
   stage: build
-  image: $CI_REGISTRY/containers/common-debian-kernel-builder:0-0-2
+  image: $CI_REGISTRY/containers/common-debian-kernel-builder:0-0-3
   variables:
     GIT_SUBMODULE_STRATEGY: recursive
     GITPORT: 766
