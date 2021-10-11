@@ -49,7 +49,6 @@ build-debian-kernel:
     - export PATH=/usr/lib/ccache:$PATH
     - export DEB_BUILD_PROFILES="cross nopython nodoc pkg.linux.notools pkg.linux.udeb-unsigned-test-build"
     - export MAKEFLAGS="-j$(($(nproc)*2))"
-    - export DEBIAN_KERNEL_DISABLE_DEBUG=$(test "$(dpkg-parsechangelog --show-field Distribution)" = "UNRELEASED" ) && export DEBIAN_KERNEL_DISABLE_DEBUG=yes
     - fakeroot make -f debian/rules orig
     - sed -i -e "s/exit 1//" debian/rules
     - fakeroot make -f debian/rules source
