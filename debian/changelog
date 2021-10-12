@@ -1,3 +1,9 @@
+linux (5.13.19-113) unstable; urgency=medium
+
+  * Update to patch 113
+
+ -- Konstantin Kirik (snegovick) <snegovick@uprojects.org>  Wed, 13 Oct 2021 02:14:41 +0300
+
 linux (5.13.19-1~exp1) bookworm; urgency=medium
 
   * Update to version 5.13.19

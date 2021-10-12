@@ -1,0 +1,27 @@
+From 4f8354a262ce0c928a2fffccccbf3fc70d207cee Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Mon, 11 Oct 2021 11:32:48 +0300
+Subject: [PATCH 108/113] Switch default governor to performance
+
+---
+ arch/arm64/configs/edelweiss_tf307_mb_d_defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig b/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig
+index 6d220883a20c..c8b093946ff8 100644
+--- a/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig
++++ b/arch/arm64/configs/edelweiss_tf307_mb_d_defconfig
+@@ -44,8 +44,10 @@ CONFIG_PM=y
+ CONFIG_CPU_IDLE_GOV_LADDER=y
+ CONFIG_ARM_CPUIDLE=y
+ CONFIG_CPU_FREQ=y
++CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE=y
+ CONFIG_CPU_FREQ_GOV_POWERSAVE=y
+ CONFIG_CPU_FREQ_GOV_USERSPACE=y
++CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y
+ CONFIG_CPUFREQ_DT=y
+ CONFIG_ACPI=y
+ CONFIG_VIRTUALIZATION=y
+-- 
+2.30.2
+

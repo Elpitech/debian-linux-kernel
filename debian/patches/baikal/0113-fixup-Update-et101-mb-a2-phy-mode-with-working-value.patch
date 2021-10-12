@@ -1,0 +1,58 @@
+From a6dedc6b82f452da0b3eeaf85d1f2921f728ab77 Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Tue, 12 Oct 2021 13:06:18 +0300
+Subject: [PATCH 113/113] fixup! Update et101-mb-a2 phy mode with working
+ value, add led configuration properties
+
+---
+ arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts | 4 ++--
+ arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts | 4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts
+index 538ce4ed5a2e..aa5f0b12a8e8 100644
+--- a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts
++++ b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a1.dts
+@@ -29,7 +29,7 @@ &gmac0 {
+ 
+ &gmac0_phy {
+ 	compatible = "ethernet-phy-id001c.c916", "ethernet-phy-ieee802.3-c22";
+-	realtek,led-mode = <RTL8211F_LED_MODE_B>;
++	realtek,led-mode = <RTL8211F_LED_MODE_A>;
+ 	realtek,led0-control = <RTL8211F_LINK10_100_ACT>;
+ 	realtek,led1-control = <RTL8211F_LINK10_1000_ACT>;
+ };
+@@ -42,7 +42,7 @@ &gmac1 {
+ 
+ &gmac1_phy {
+ 	compatible = "ethernet-phy-id001c.c916", "ethernet-phy-ieee802.3-c22";
+-	realtek,led-mode = <RTL8211F_LED_MODE_B>;
++	realtek,led-mode = <RTL8211F_LED_MODE_A>;
+ 	realtek,led0-control = <RTL8211F_LINK10_100_ACT>;
+ 	realtek,led1-control = <RTL8211F_LINK10_1000_ACT>;
+ };
+diff --git a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
+index c755d964d0da..feea4abd4136 100644
+--- a/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
++++ b/arch/arm64/boot/dts/baikal/elpitech-et101-mb-a2.dts
+@@ -30,7 +30,7 @@ &gmac0 {
+ 
+ &gmac0_phy {
+ 	compatible = "ethernet-phy-id001c.c916", "ethernet-phy-ieee802.3-c22";
+-	realtek,led-mode = <RTL8211F_LED_MODE_B>;
++	realtek,led-mode = <RTL8211F_LED_MODE_A>;
+ 	realtek,led0-control = <RTL8211F_LINK10_100_ACT>;
+ 	realtek,led1-control = <RTL8211F_LINK10_1000_ACT>;
+ };
+@@ -43,7 +43,7 @@ &gmac1 {
+ 
+ &gmac1_phy {
+ 	compatible = "ethernet-phy-id001c.c916", "ethernet-phy-ieee802.3-c22";
+-	realtek,led-mode = <RTL8211F_LED_MODE_B>;
++	realtek,led-mode = <RTL8211F_LED_MODE_A>;
+ 	realtek,led0-control = <RTL8211F_LINK10_100_ACT>;
+ 	realtek,led1-control = <RTL8211F_LINK10_1000_ACT>;
+ };
+-- 
+2.30.2
+

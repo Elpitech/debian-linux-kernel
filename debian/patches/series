@@ -233,7 +233,13 @@ baikal/0100-Baikal-M-Fixed-build-HDA-driver-as-module.patch
 baikal/0101-CI-Updated-container.patch
 baikal/0102-dts-Enable-HDA-only-for-et101-bm-a1-a2.patch
 baikal/0103-defconfig-Removed-CONFIG_DRM_DW_HDMI_AHB_AUDIO-m.patch
-baikal/0104-Change-HDA-compilation-mode-from-module-to-built-in.patch
-baikal/0105-Update-et101-mb-a2-phy-mode-with-working-value-add-l.patch
-baikal/0106-Add-device-tree-properties-and-driver-code-to-config.patch
-
+baikal/0104-Fix-kconfig-to-disable-Baikal-ahb-audio-when-Dw-ahb-.patch
+baikal/0105-Change-HDA-compilation-mode-from-module-to-built-in.patch
+baikal/0106-Update-et101-mb-a2-phy-mode-with-working-value-add-l.patch
+baikal/0107-Add-device-tree-properties-and-driver-code-to-config.patch
+baikal/0108-Switch-default-governor-to-performance.patch
+baikal/0109-Rename-tf307-config-remove-separate-et101-config.patch
+baikal/0110-Configure-nbd-loop-and-ram-device-drivers-as-modules.patch
+baikal/0111-Disable-boot-logo.patch
+baikal/0112-fixup-Add-device-tree-properties-and-driver-code-to-.patch
+baikal/0113-fixup-Update-et101-mb-a2-phy-mode-with-working-value.patch

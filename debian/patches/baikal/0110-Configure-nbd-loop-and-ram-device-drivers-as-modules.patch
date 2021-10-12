@@ -1,0 +1,32 @@
+From 66be1db0a03016ea4ae26bc97d906a75cb38d0fe Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Tue, 12 Oct 2021 03:24:48 +0300
+Subject: [PATCH 110/113] Configure nbd, loop and ram device drivers as modules
+
+---
+ arch/arm64/configs/elpitech_et_series_defconfig | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm64/configs/elpitech_et_series_defconfig b/arch/arm64/configs/elpitech_et_series_defconfig
+index c8b093946ff8..cd57bdcad1c6 100644
+--- a/arch/arm64/configs/elpitech_et_series_defconfig
++++ b/arch/arm64/configs/elpitech_et_series_defconfig
+@@ -240,12 +240,12 @@ CONFIG_MTD_SPI_NOR=y
+ CONFIG_BLK_DEV_NULL_BLK=m
+ CONFIG_BLK_DEV_PCIESSD_MTIP32XX=m
+ CONFIG_ZRAM=m
+-CONFIG_BLK_DEV_LOOP=y
++CONFIG_BLK_DEV_LOOP=m
+ CONFIG_BLK_DEV_CRYPTOLOOP=m
+ CONFIG_BLK_DEV_DRBD=m
+-CONFIG_BLK_DEV_NBD=y
++CONFIG_BLK_DEV_NBD=m
+ CONFIG_BLK_DEV_SX8=m
+-CONFIG_BLK_DEV_RAM=y
++CONFIG_BLK_DEV_RAM=m
+ CONFIG_BLK_DEV_RAM_SIZE=16384
+ CONFIG_ATA_OVER_ETH=m
+ CONFIG_VIRTIO_BLK=m
+-- 
+2.30.2
+

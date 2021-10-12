@@ -1,0 +1,24 @@
+From 558cf98b857926b9ff8cf8bbc8d963a14387454f Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Tue, 12 Oct 2021 03:30:31 +0300
+Subject: [PATCH 111/113] Disable boot logo
+
+---
+ arch/arm64/configs/elpitech_et_series_defconfig | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/arch/arm64/configs/elpitech_et_series_defconfig b/arch/arm64/configs/elpitech_et_series_defconfig
+index cd57bdcad1c6..435b46863e8c 100644
+--- a/arch/arm64/configs/elpitech_et_series_defconfig
++++ b/arch/arm64/configs/elpitech_et_series_defconfig
+@@ -345,7 +345,6 @@ CONFIG_DRM_PANFROST=m
+ CONFIG_FB_MODE_HELPERS=y
+ CONFIG_FB_EFI=y
+ CONFIG_FRAMEBUFFER_CONSOLE=y
+-CONFIG_LOGO=y
+ CONFIG_SOUND=y
+ CONFIG_SND=y
+ CONFIG_SND_HDA_BAIKAL_M=m
+-- 
+2.30.2
+

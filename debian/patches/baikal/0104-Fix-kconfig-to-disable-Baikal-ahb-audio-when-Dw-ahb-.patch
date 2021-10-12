@@ -1,0 +1,26 @@
+From 3e7b147b9656714ae226387f4b8ea4d9c8d539e3 Mon Sep 17 00:00:00 2001
+From: "Konstantin Kirik (snegovick)" <snegovick@uprojects.org>
+Date: Thu, 7 Oct 2021 23:50:02 +0300
+Subject: [PATCH 104/113] Fix kconfig to disable Baikal ahb audio when Dw ahb
+ audio is enabled
+
+---
+ drivers/gpu/drm/bridge/synopsys/Kconfig | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/bridge/synopsys/Kconfig b/drivers/gpu/drm/bridge/synopsys/Kconfig
+index 2f914d45755e..2f97f25020a6 100644
+--- a/drivers/gpu/drm/bridge/synopsys/Kconfig
++++ b/drivers/gpu/drm/bridge/synopsys/Kconfig
+@@ -49,7 +49,7 @@ config DRM_BAIKAL_HDMI
+ 
+ config DRM_BAIKAL_HDMI_AHB_AUDIO
+ 	tristate "Baikal-M HDMI Audio interface"
+-	depends on DRM_BAIKAL_HDMI && SND
++	depends on DRM_BAIKAL_HDMI && SND && (DRM_DW_HDMI_AHB_AUDIO != y && DRM_DW_HDMI_AHB_AUDIO != m)
+ 	default m if ARCH_BAIKAL
+ 	select SND_PCM
+ 	select SND_PCM_ELD
+-- 
+2.30.2
+
