@@ -35,3 +35,6 @@ rockchip-io-domain ?
 
 # Pin controllers
 drivers/pinctrl/**
+
+# PCIe controllers
+drivers/pci/controller/dwc/**
